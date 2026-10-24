@@ -250,7 +250,8 @@ public final class SiteHealthChecker {
                 case '\t': sb.append("\\t"); break;
                 default:
                     if (c < 0x20) {
-                        // 注意：不能用 "\u%04x" 这种字面量，Java 词法阶段会把它当 Unicode 转义而报错
+                        // 注意：这里不能用反斜杠 u 加格式串的字面量写法，
+                        // Java 在词法阶段就会把反斜杠 u 当成 Unicode 转义，直接报 illegal unicode escape
                         sb.append('\\').append('u')
                           .append(String.format(Locale.US, "%04x", (int) c));
                     } else {
