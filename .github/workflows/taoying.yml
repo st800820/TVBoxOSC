@@ -1,5 +1,9 @@
 name: TaoYing Build
 
+# 触发方式：
+#   1) 手动：Actions → TaoYing Build → Run workflow
+#   2) 自动：push 到 master 且改动命中 paths 时自动构建（用于「改完即出包」）
+
 on:
   workflow_dispatch:
     inputs:
@@ -16,65 +20,71 @@ on:
         required: false
         type: boolean
         default: true
+  push:
+    branches: [ master ]
+    paths:
+      - '.github/workflows/taoying.yml'
+      - 'tools/**'
+      - 'custom/**'
 
 permissions:
   contents: write
 
+concurrency:
+  group: taoying-build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
     env:
       APP_NAME: ${{ inputs.app_name || '涛影' }}
       API_URL: ${{ inputs.api_url || 'https://ghproxy.net/https://raw.githubusercontent.com/gaotianliuyun/gao/master/0821.json' }}
       APP_ID: com.taoying.app
+      ENABLE_DESUGAR: 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Checkout Source Code
-        run: |
-          git clone --depth 1 https://github.com/q215613905/TVBoxOS TVBoxOSC
-          cd TVBoxOSC
-          echo "tag=taoying-$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
-          echo "date=$(date +%Y%m%d)" >> $GITHUB_ENV
-          echo "将构建: APP_NAME=$APP_NAME  APP_ID=$APP_ID"
-          echo "内置源: $API_URL"
-
-      - name: Customize
-        working-directory: TVBoxOSC
+      # 记录上游 commit，便于事后定位「这批包是基于哪个上游版本」，也可据此回退
+      - name: Clone upstream source
         run: |
           set -e
-          # 1. 修改包名（与原版 TVBox 共存）
-          sed -i "s#applicationId 'com.github.tvbox.osc.jun'#applicationId '${APP_ID}'#" app/build.gradle
-          # 2. 修改应用名称（strings.xml 内用 # 分隔避免特殊字符）
-          sed -i "s#<string name=\"app_name\">TVBox</string>#<string name=\"app_name\">${APP_NAME}</string>#" app/src/main/res/values/strings.xml
-          # 3. 投屏提示中的名称
-          sed -i "s#已安装TVBox#已安装${APP_NAME}#g" app/src/main/res/layout/dialog_cast.xml
-          # 4. 内置订阅源（首次启动自动写入，用户在 App 内改源后不覆盖）
-          sed -i '/Hawk.init(this).build();/a\        if (!Hawk.contains(HawkConfig.API_URL)) { Hawk.put(HawkConfig.API_URL, "'"${API_URL}"'"); }' app/src/main/java/com/github/tvbox/osc/base/App.java
-          # 5. 版本号
-          sed -i "s#versionName '1.0.0'#versionName '1.0.0-taoying-${{ env.date }}'#" app/build.gradle
-          # 6. 替换图标（启动器图标 4 个密度 + TV 横幅）
-          cp -f ${{ github.workspace }}/custom/icons/drawable-hdpi/app_icon.png    app/src/main/res/drawable-hdpi/app_icon.png
-          cp -f ${{ github.workspace }}/custom/icons/drawable-xhdpi/app_icon.png   app/src/main/res/drawable-xhdpi/app_icon.png
-          cp -f ${{ github.workspace }}/custom/icons/drawable-xxhdpi/app_icon.png  app/src/main/res/drawable-xxhdpi/app_icon.png
-          cp -f ${{ github.workspace }}/custom/icons/drawable-xxxhdpi/app_icon.png app/src/main/res/drawable-xxxhdpi/app_icon.png
-          cp -f ${{ github.workspace }}/custom/icons/drawable/app_banner.png       app/src/main/res/drawable/app_banner.png
-          # 7. crosswalk maven 源防失效
-          if grep -q 'crosswalk' build.gradle; then
-            sed -i "/crosswalk/a\        maven { url 'https://j4uq.github.io/crosswalk/releases/crosswalk/android/maven2' }" build.gradle
-          else
-            sed -i "/jitpack.io/a\        maven { url 'https://j4uq.github.io/crosswalk/releases/crosswalk/android/maven2' }" build.gradle
-          fi
-          # 8. 去掉 pyramid 里的 Windows Python 硬编码路径（配置阶段需要）
-          sed -i '/buildPython.*python.exe/d' pyramid/build.gradle
-          echo "" > local.properties
-          # ===== 验证修改结果 =====
-          echo '--- applicationId ---'; grep -n "applicationId" app/build.gradle
-          echo '--- app_name ---'; grep -n 'app_name' app/src/main/res/values/strings.xml
-          echo '--- builtin api ---'; grep -n 'HawkConfig.API_URL' app/src/main/java/com/github/tvbox/osc/base/App.java
-          echo '--- versionName ---'; grep -n 'versionName' app/build.gradle
-          echo '--- icons ---'; ls -l app/src/main/res/drawable-*/app_icon.png app/src/main/res/drawable/app_banner.png
+          git clone --depth 1 https://github.com/q215613905/TVBoxOS TVBoxOSC
+          UPSTREAM=$(git -C TVBoxOSC rev-parse --short HEAD)
+          echo "UPSTREAM_SHA=$UPSTREAM" >> $GITHUB_ENV
+          echo "tag=taoying-$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
+          echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+          echo "VERSION_CODE=$(date +%y%m%d%H)" >> $GITHUB_ENV
+          echo "上游版本: $UPSTREAM"
+          echo "应用: $APP_NAME ($APP_ID)"
+          echo "内置源: $API_URL"
+
+      # 所有源码改动集中在这个脚本里，失败会中止构建并留下日志
+      - name: Customize sources
+        run: |
+          set -o pipefail
+          python3 "$GITHUB_WORKSPACE/tools/patch_sources.py" TVBoxOSC 2>&1 | tee /tmp/patch.log
+
+      - name: Copy icons
+        run: |
+          set -e
+          SRC="$GITHUB_WORKSPACE/custom/icons"
+          DST="TVBoxOSC/app/src/main/res"
+          cp -f "$SRC/drawable-hdpi/app_icon.png"    "$DST/drawable-hdpi/app_icon.png"
+          cp -f "$SRC/drawable-xhdpi/app_icon.png"   "$DST/drawable-xhdpi/app_icon.png"
+          cp -f "$SRC/drawable-xxhdpi/app_icon.png"  "$DST/drawable-xxhdpi/app_icon.png"
+          cp -f "$SRC/drawable-xxxhdpi/app_icon.png" "$DST/drawable-xxxhdpi/app_icon.png"
+          cp -f "$SRC/drawable/app_banner.png"       "$DST/drawable/app_banner.png"
+          ls -l "$DST"/drawable-*/app_icon.png "$DST"/drawable/app_banner.png
+          # 图标必须是真 PNG，防止上传坏文件后打进包里
+          BAD=$(for p in "$DST"/drawable-*/app_icon.png; do
+                  magic=$(head -c 8 "$p" | od -An -tx1 | tr -d ' \n')
+                  [ "$magic" = "89504e470d0a1a0a" ] || echo "$p($magic)"
+                done)
+          if [ -n "$BAD" ]; then echo "::error::图标不是有效 PNG: $BAD"; exit 1; fi
+          echo "图标校验通过"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -90,35 +100,68 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Release Apk Sign
+      # 签名材料（沿用原 TVBoxOSC.jks，保证与历史版本可覆盖升级）
+      - name: Setup signing
         working-directory: TVBoxOSC
         run: |
-          signingConfigs='ICAgIHNpZ25pbmdDb25maWdzIHtcCiAgICAgICAgaWYgKHByb2plY3QuaGFzUHJvcGVydHkoIlJFTEVBU0VfU1RPUkVfRklMRSIpKSB7XAogICAgICAgICAgICBteUNvbmZpZyB7XAogICAgICAgICAgICAgICAgc3RvcmVGaWxlIGZpbGUoUkVMRUFTRV9TVE9SRV9GSUxFKVwKICAgICAgICAgICAgICAgIHN0b3JlUGFzc3dvcmQgUkVMRUFTRV9TVE9SRV9QQVNTV09SRFwKICAgICAgICAgICAgICAgIGtleUFsaWFzIFJFTEVBU0VfS0VZX0FMSUFTXAogICAgICAgICAgICAgICAga2V5UGFzc3dvcmQgUkVMRUFTRV9LRVlfUEFTU1dPUkRcCiAgICAgICAgICAgICAgICB2MVNpZ25pbmdFbmFibGVkIHRydWVcCiAgICAgICAgICAgICAgICB2MlNpZ25pbmdFbmFibGVkIHRydWVcCiAgICAgICAgICAgICAgICBlbmFibGVWM1NpZ25pbmcgPSB0cnVlXAogICAgICAgICAgICAgICAgZW5hYmxlVjRTaWduaW5nID0gdHJ1ZVwKICAgICAgICAgICAgfVwKICAgICAgICB9XAogICAgfVwKXA=='
-          signingConfig='ICAgICAgICAgICAgaWYgKHByb2plY3QuaGFzUHJvcGVydHkoIlJFTEVBU0VfU1RPUkVfRklMRSIpKSB7XAogICAgICAgICAgICAgICAgc2lnbmluZ0NvbmZpZyBzaWduaW5nQ29uZmlncy5teUNvbmZpZ1wKICAgICAgICAgICAgfVwK'
-          signingConfigs="$(echo "$signingConfigs" |base64 -d )"
-          signingConfig="$(echo "$signingConfig" |base64 -d )"
-          sed -i -e "/defaultConfig {/i\\$signingConfigs " -e "/debug {/a\\$signingConfig " -e "/release {/a\\$signingConfig " app/build.gradle
-          cp -f ${{ github.workspace }}/.github/workflows/TVBoxOSC.jks app/TVBoxOSC.jks
-          sed -i '$a\RELEASE_STORE_FILE=./TVBoxOSC.jks' ./gradle.properties
-          sed -i '$a\RELEASE_KEY_ALIAS=TVBoxOSC'            ./gradle.properties
-          sed -i '$a\RELEASE_STORE_PASSWORD=TVBoxOSC'       ./gradle.properties
-          sed -i '$a\RELEASE_KEY_PASSWORD=TVBoxOSC'         ./gradle.properties
+          set -e
+          cp -f "$GITHUB_WORKSPACE/.github/workflows/TVBoxOSC.jks" app/TVBoxOSC.jks
+          printf '\nRELEASE_STORE_FILE=./TVBoxOSC.jks\nRELEASE_KEY_ALIAS=TVBoxOSC\nRELEASE_STORE_PASSWORD=TVBoxOSC\nRELEASE_KEY_PASSWORD=TVBoxOSC\n' >> ./gradle.properties
+          grep -c RELEASE_ ./gradle.properties
 
+      # 一次构建两个包：java（双架构通用）+ java32（仅 armv7，老盒子安装/启动更快）
       - name: Build With Gradle
         working-directory: TVBoxOSC
         run: |
           chmod +x gradlew
-          ./gradlew assembleJavaRelease --stacktrace
+          set -o pipefail
+          ./gradlew assembleJavaRelease assembleJava32Release --stacktrace 2>&1 | tee /tmp/build.log
 
-      - name: Prepare Apk
+      - name: Verify And Collect
         working-directory: TVBoxOSC
         run: |
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
           mkdir -p apk
-          APK=$(find . -path "*outputs/apk*" -name "*.apk" | grep -v unsigned | head -1)
-          if [ -z "$APK" ]; then APK=$(find . -path "*outputs/apk*" -name "*.apk" | head -1); fi
-          echo "found apk: $APK"
-          cp -f "$APK" "apk/TaoYing_${{ env.tag }}.apk"
+          UNI=""; A32=""
+          for f in $(find app/build/outputs/apk -name '*.apk' | grep -v unsigned); do
+            echo "== 候选: $f"
+            "$BT/aapt2" dump badging "$f" | head -3
+            if "$BT/aapt2" dump badging "$f" | grep -q "native-code: .*arm64"; then
+              UNI="$f"
+            else
+              A32="$f"
+            fi
+          done
+          [ -n "$UNI" ] || { echo "::error::未产出双架构通用包"; exit 1; }
+          echo "通用包: $UNI"
+          echo "armv7包: ${A32:-（无）}"
+
+          BAD=$("$BT/aapt2" dump badging "$UNI")
+          echo "$BAD" | grep -q "package: name='com.taoying.app'" || { echo "::error::包名不正确"; exit 1; }
+          echo "$BAD" | grep -q "sdkVersion:'19'"                 || { echo "::error::minSdk 不是 19"; exit 1; }
+          echo "$BAD" | grep -q "native-code: .*arm64-v8a"        || { echo "::error::通用包缺 arm64"; exit 1; }
+          "$BT/apksigner" verify --print-certs "$UNI" | grep -q "Verified using v1 scheme (JAR signing): true" \
+            || { echo "::error::缺 v1 签名，Android 4.4 无法安装"; exit 1; }
+
+          cp -f "$UNI" "apk/TaoYing_${tag}_universal.apk"
+          if [ -n "$A32" ]; then
+            BAD32=$("$BT/aapt2" dump badging "$A32")
+            echo "$BAD32" | grep -q "sdkVersion:'19'" || { echo "::error::armv7 包 minSdk 异常"; exit 1; }
+            echo "$BAD32" | grep -q "native-code: 'armeabi-v7a'" || { echo "::error::armv7 包架构异常"; exit 1; }
+            "$BT/apksigner" verify --print-certs "$A32" | grep -q "Verified using v1 scheme (JAR signing): true" \
+              || { echo "::error::armv7 包缺 v1 签名"; exit 1; }
+            cp -f "$A32" "apk/TaoYing_${tag}_arm32.apk"
+          fi
+
+          echo "== 产物 =="
           ls -lh apk/
+          echo "== 体积构成 =="
+          for p in apk/*.apk; do
+            echo "-- $p"
+            unzip -l "$p" | grep -E "classes[0-9]*\.dex|lib/.*\.so" | awk '{printf "   %10d  %s\n", $1, $4}'
+          done
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -128,17 +171,47 @@ jobs:
           retention-days: 30
 
       - name: Release To GitHub
-        if: ${{ inputs.publish }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
         uses: ncipollo/release-action@v1
         with:
           name: ${{ env.tag }}
           tag: ${{ env.tag }}
           body: |
-            ## 涛影 TVBox 定制版
-            - 应用名称：${{ env.APP_NAME }}
-            - 包名：${{ env.APP_ID }}（可与原版共存）
-            - 内置订阅源：${{ env.API_URL }}
-            - 基于 q215613905/TVBoxOS 最新 main 分支构建
-            - 仅 java flavor（armeabi-v7a + arm64-v8a）
+            ## 涛影 TVBox 定制版（${{ env.tag }}）
+
+            | 项 | 值 |
+            |---|---|
+            | 应用名 / 包名 | ${{ env.APP_NAME }} / `${{ env.APP_ID }}` |
+            | 版本 | `1.0.0-taoying-${{ env.BUILD_DATE }}`（versionCode `${{ env.VERSION_CODE }}`） |
+            | 上游源码 | q215613905/TVBoxOS @ `${{ env.UPSTREAM_SHA }}` |
+            | 内置源 | ${{ env.API_URL }} |
+
+            ### 两个包怎么选
+            - `*_universal.apk`：arm64 + armv7 通用，新手机/新盒子用这个
+            - `*_arm32.apk`：仅 armeabi-v7a，体积小约 13 MB，**安卓 4.4 老机顶盒优先装这个**
+
+            ### 本版改动
+            - 移除代码零引用的 cronet 依赖（省约 4 MB，减少 4.4 上的未知风险）
+            - EPG 数据解析、播放缓存清理移出主线程（缩短首屏时间）
+            - versionCode 改为日期号，修复长期恒为 1 无法判断新旧的问题
+            - 新增构建期断言：包名 / minSdk / 架构 / v1 签名，任一不符即中止出包
+
+            > 回退方式：装回上一个 tag 的 APK 即可（同签名可覆盖安装）。
           allowUpdates: true
           artifacts: TVBoxOSC/apk/*.apk
+
+      # 构建失败时把日志推到 ci-logs 分支，方便无人值守排查（不影响 master）
+      - name: Publish failure log
+        if: failure()
+        run: |
+          set +e
+          mkdir -p ci-logs
+          {
+            echo "======= patch.log ======="; tail -n 200 /tmp/patch.log 2>/dev/null
+            echo "======= build.log ======="; tail -n 400 /tmp/build.log 2>/dev/null
+          } > ci-logs/last-build.log
+          git config user.name "taoying-ci"
+          git config user.email "ci@local"
+          git add ci-logs/last-build.log
+          git commit -m "ci: failure log $(date -u +%Y%m%d-%H%M%S)"
+          git push origin HEAD:ci-logs --force
