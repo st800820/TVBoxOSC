@@ -1,0 +1,81 @@
+name: Source Watch
+
+# 每天巡检一次订阅源健康度；源大面积失效时自动开 issue 提醒
+on:
+  schedule:
+    - cron: '0 0 * * *'        # UTC 00:00 = 北京 08:00
+  workflow_dispatch:
+    inputs:
+      config_url:
+        description: '要巡检的配置地址（默认内置源）'
+        required: false
+        default: 'https://raw.githubusercontent.com/gaotianliuyun/gao/master/0821.json'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 巡检
+        id: check
+        env:
+          CFG: ${{ inputs.config_url || 'https://raw.githubusercontent.com/gaotianliuyun/gao/master/0821.json' }}
+        run: |
+          set +e
+          python tools/source-health/check_sources.py --config "$CFG" --json report.json | tee summary.txt
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> $GITHUB_OUTPUT
+          exit 0
+
+      - name: 写入 Job 摘要
+        if: always()
+        run: |
+          {
+            echo "## 涛影订阅源巡检"
+            echo ""
+            echo '```'
+            cat summary.txt 2>/dev/null || echo "无输出"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: 有异常时开 issue
+        if: steps.check.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = '自动巡检发现订阅源异常，请查看并决定是否换源。\n\n```\n' +
+              (fs.existsSync('summary.txt') ? fs.readFileSync('summary.txt', 'utf8') : '无输出') + '\n```';
+            const title = '[巡检] 订阅源异常 ' + new Date().toISOString().slice(0, 10);
+            const list = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'source-watch'
+            });
+            if (list.data.length) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: list.data[0].number, body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ['source-watch']
+              });
+            }
+
+      - name: 上传巡检报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-report
+          path: |
+            summary.txt
+            report.json
+          retention-days: 30
