@@ -185,7 +185,11 @@ a.replace(
     "内置订阅源注入",
     "Hawk.init(this).build();",
     "Hawk.init(this).build();\n"
-    f'        if (!Hawk.contains(HawkConfig.API_URL)) {{ Hawk.put(HawkConfig.API_URL, "{API_URL}"); }}\n'
+    '        // [涛影] 内置源：首次写入；若仍是旧内置源（gao/ghproxy），升级时自动迁移到自托管配置\n'
+    '        String tyApi = Hawk.get(HawkConfig.API_URL, "");\n'
+    '        if (tyApi.isEmpty() || tyApi.contains("gaotianliuyun/gao") || tyApi.contains("ghproxy.net")) {\n'
+    f'            Hawk.put(HawkConfig.API_URL, "{API_URL}");\n'
+    '        }\n'
     '        // [涛影] 直播默认 IJK 硬解：EXO 在 4.4 老盒子上播 HLS 常黑屏（点播仍用 EXO，不动）\n'
     '        if (!Hawk.contains(HawkConfig.LIVE_PLAY_TYPE)) { Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 1); }\n'
     '        if (!Hawk.contains(HawkConfig.IJK_CODEC)) { Hawk.put(HawkConfig.IJK_CODEC, "\u786c\u89e3\u7801"); }',
