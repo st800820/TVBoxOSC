@@ -329,6 +329,40 @@ rs.replace(
 rs.save()
 
 # ----------------------------------------------------------------------------
+# 4.6 点播站点自检（App 自己遍历所有源真实加载一遍，输出可用/失效清单）
+# ----------------------------------------------------------------------------
+try:
+    hsrc = pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")) / "tools/site-health/SiteHealthChecker.java"
+    if hsrc.exists():
+        hdst = ROOT / "app/src/main/java/com/github/tvbox/osc/util/health/SiteHealthChecker.java"
+        hdst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(hsrc, hdst)
+        done.append("注入站点自检 SiteHealthChecker")
+
+        hc = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/HomeActivity.java")
+        hc.replace(
+            "站点自检入口",
+            "    protected void init() {",
+            "    protected void init() {\n"
+            "        // [涛影] 每 N 天自动跑一次点播源自检，结果写 files/site-health.json\n"
+            "        com.github.tvbox.osc.util.health.SiteHealthChecker.schedule(this);",
+            required=False,
+        )
+        hc.save()
+
+        # release 构建 minifyEnabled=true，加 keep 规则防止被裁剪/改名
+        pg = Doc("app/proguard-rules.pro")
+        if "com.github.tvbox.osc.util.health" not in pg.text:
+            pg.text += ("\n# [涛影] 点播站点自检，保持类名避免被裁剪\n"
+                        "-keep class com.github.tvbox.osc.util.health.** { *; }\n")
+            pg.save()
+            done.append("proguard keep 站点自检")
+    else:
+        skipped.append("缺少 tools/site-health/SiteHealthChecker.java")
+except Exception as e:
+    skipped.append("站点自检注入失败：%s" % e)
+
+# ----------------------------------------------------------------------------
 # 5. 工程配置
 # ----------------------------------------------------------------------------
 root_gradle = ROOT / "build.gradle"
