@@ -1,0 +1,45 @@
+name: Live Source
+
+# 每天拉 Guovin/iptv-api 的测速结果，过滤成「央视 + 卫视 + 地方台」，提交到 live/
+# 涛影的直播源指向 live/taoying-live.m3u，所以这里更新完，客户端下次启动就是新的
+on:
+  schedule:
+    - cron: '30 19 * * *'      # UTC 19:30 = 北京 03:30（避开 Guovin 凌晨跑批）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-source
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 生成直播源
+        run: |
+          python tools/live/make_live.py --outdir live
+          echo "--- 结果 ---"
+          grep -c "^#EXTINF" live/taoying-live.m3u || true
+          ls -lh live/
+
+      - name: 提交变更
+        run: |
+          git config user.name "taoying-bot"
+          git config user.email "bot@local"
+          git add live/
+          if git diff --staged --quiet; then
+            echo "无变化，跳过"
+          else
+            git commit -m "chore(live): 更新直播源 $(date -u +%Y%m%d-%H%M)"
+            git push
+          fi

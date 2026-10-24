@@ -185,7 +185,10 @@ a.replace(
     "内置订阅源注入",
     "Hawk.init(this).build();",
     "Hawk.init(this).build();\n"
-    f'        if (!Hawk.contains(HawkConfig.API_URL)) {{ Hawk.put(HawkConfig.API_URL, "{API_URL}"); }}',
+    f'        if (!Hawk.contains(HawkConfig.API_URL)) {{ Hawk.put(HawkConfig.API_URL, "{API_URL}"); }}\n'
+    '        // [涛影] 直播默认 IJK 硬解：EXO 在 4.4 老盒子上播 HLS 常黑屏（点播仍用 EXO，不动）\n'
+    '        if (!Hawk.contains(HawkConfig.LIVE_PLAY_TYPE)) { Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 1); }\n'
+    '        if (!Hawk.contains(HawkConfig.IJK_CODEC)) { Hawk.put(HawkConfig.IJK_CODEC, "\u786c\u89e3\u7801"); }',
     expect=1,
 )
 
