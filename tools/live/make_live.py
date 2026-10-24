@@ -25,7 +25,7 @@ import urllib.request
 RAW = "https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/"
 SRC_IPV4 = RAW + "ipv4/result.m3u"
 SRC_IPV6 = RAW + "ipv6/result.m3u"
-EPG = "https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/epg/epg.gz"
+EPG = "http://epg.51zmt.top:8000/e.xml.gz"
 
 # 明确排除：境外、港澳台、境外版央视
 BLOCK = ("TVBS", "凤凰", "中天", "东森", "三立", "民视", "翡翠", "无线", "NOW", "HOY",
@@ -67,33 +67,32 @@ def parse_m3u(text):
     return out
 
 
-def keep(name, group):
+def category(name):
+    """返回 (类别序号, 类别名)；不属于四类返回 None。
+    顺序：央视 > 卫视 > 体育 > 电影"""
     up = name.upper()
     if any(b in up for b in (b.upper() for b in BLOCK)):
-        return False
-    if "更新时间" in group or "更新时间" in name:
-        return False
-    if re.search(r"CCTV-?\d|CCTV-?5\+|CETV", up):
-        return True
+        return None
+    if re.search(r"CCTV-?\s*5", up) or "体育" in name:
+        return (2, "体育")
+    if re.search(r"CCTV-?\s*6\b", up) or "电影" in name or up.startswith("CHC"):
+        return (3, "电影")
+    if re.search(r"CCTV-?\s*\d", up):
+        return (0, "央视")
     if "卫视" in name:
-        return True
-    if any(p in name for p in PROVINCE):
-        return True
-    if any(k in name for k in ("新闻综合", "公共频道", "都市", "影视", "生活", "经济", "科教",
-                               "少儿", "体育", "文艺", "纪实", "法制", "农业", "综合")):
-        return True
-    return False
+        return (1, "卫视")
+    return None
 
 
-def cctv_rank(name):
-    m = re.search(r"CCTV-?\s*(\d+)(\+)?", name.upper())
-    if m:
-        return (0, int(m.group(1)), 1 if m.group(2) else 0)
-    if "CETV" in name.upper():
-        return (1, 0, 0)
-    if "卫视" in name:
-        return (2, 0, 0)
-    return (3, 0, 0)
+def keep(name, group):
+    return category(name) is not None
+
+
+def sort_key(name):
+    cat = category(name)
+    idx = cat[0] if cat else 9
+    m = re.search(r"CCTV-?\s*(\d+)", name.upper())
+    return (idx, int(m.group(1)) if m else 0, name)
 
 
 def main():
@@ -134,7 +133,7 @@ def main():
         per[key] = per.get(key, 0) + 1
         kept.append((tvg_id, name, logo, group, url))
 
-    kept.sort(key=lambda x: (cctv_rank(x[1]), x[1]))
+    kept.sort(key=lambda x: sort_key(x[1]))
     print(f"过滤后: {len(kept)} 条 / {len(per)} 个频道")
 
     os.makedirs(a.outdir, exist_ok=True)
@@ -142,7 +141,7 @@ def main():
 
     m3u = [f'#EXTM3U x-tvg-url="{epg_url}"']
     for tvg_id, name, logo, group, url in kept:
-        g = group if group and "更新时间" not in group else "直播"
+        g = category(name)[1]
         m3u.append(f'#EXTINF:-1 tvg-id="{tvg_id}" tvg-name="{tvg_id}" tvg-logo="{logo}" group-title="{g}",{name}')
         m3u.append(url)
     m3u_path = os.path.join(a.outdir, "taoying-live.m3u")
@@ -152,7 +151,7 @@ def main():
     # TVBox txt 格式：分组,#genre# 然后 频道名,url
     lines, last_group = [], None
     for tvg_id, name, logo, group, url in kept:
-        g = group if group and "更新时间" not in group else "直播"
+        g = category(name)[1]
         if g != last_group:
             lines.append(f"{g},#genre#")
             last_group = g
@@ -165,8 +164,8 @@ def main():
     from collections import Counter
     c = Counter()
     for _i, n, _l, _g, _u in kept:
-        c[cctv_rank(n)[0]] += 1
-    print(f"央视 {c[0]} / CETV {c[1]} / 卫视 {c[2]} / 地方 {c[3]}")
+        c[category(n)[1]] += 1
+    print(" / ".join(f"{k} {v}" for k, v in c.items()))
     return 0
 
 
