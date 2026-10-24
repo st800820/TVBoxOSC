@@ -259,6 +259,76 @@ e.replace(
 e.save()
 
 # ----------------------------------------------------------------------------
+# 4.5 隐私 / 性能微调（2026-10-24）
+# ----------------------------------------------------------------------------
+import shutil
+
+# 4.5.1 删掉代码里从未使用的定位权限（全仓库无 LocationManager 调用）
+for mf in ("app/src/main/AndroidManifest.xml", "player/src/main/AndroidManifest.xml"):
+    try:
+        d = Doc(mf)
+        d.replace("移除定位权限",
+                  '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n',
+                  "", required=False, expect=None)
+        d.save()
+    except SystemExit:
+        pass
+
+# 4.5.2 直播右上角台标：不再旋转（原来 ObjectAnimator 无限转，方图转起来四角露白边，还持续重绘）
+lp = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
+lp.replace(
+    "去掉台标旋转动画",
+    '        //右上角图片旋转\n'
+    '        objectAnimator = ObjectAnimator.ofFloat(iv_circle_bg,"rotation", 360.0f);\n'
+    '        objectAnimator.setDuration(postTimeout);\n'
+    '        objectAnimator.setRepeatCount(-1);\n'
+    '        objectAnimator.start();',
+    "        // [涛影] 台标固定不旋转：省掉持续重绘，也避免方图旋转时的白边",
+    required=False,
+)
+lp.save()
+
+# 4.5.3 台标换成圆形透明图（原来直接用 app_icon 这张方图）
+try:
+    src_icon = pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")) / "tools/assets/ic_live_logo.png"
+    if src_icon.exists():
+        dst_dir = ROOT / "app/src/main/res/drawable-nodpi"
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src_icon, dst_dir / "ic_live_logo.png")
+        done.append("复制圆形台标 ic_live_logo.png")
+        lay = Doc("app/src/main/res/layout/activity_live_play.xml")
+        src_line = 'android:src="@drawable/app_icon" />'
+        cnt = lay.text.count(src_line)
+        if cnt == 1:
+            lay.text = lay.text.replace(src_line, 'android:src="@drawable/ic_live_logo" />', 1)
+            done.append("台标 src 改为 ic_live_logo")
+        else:
+            skipped.append("台标 src 匹配 %d 处，跳过换图" % cnt)
+        lay.save()
+    else:
+        skipped.append("缺少 tools/assets/ic_live_logo.png")
+except Exception as e:
+    skipped.append("台标圆形图处理失败：%s" % e)
+
+# 4.5.4 修局域网 HTTP 服务 /file/ 的路径穿越（原来可读设备任意文件）
+rs = Doc("app/src/main/java/com/github/tvbox/osc/server/RemoteServer.java")
+rs.replace(
+    "修复 /file/ 路径穿越",
+    '                        String f = fileName.substring(6);\n'
+    '                        String root = Environment.getExternalStorageDirectory().getAbsolutePath();\n'
+    '                        String file = root + "/" + f;',
+    '                        String f = fileName.substring(6);\n'
+    '                        String root = Environment.getExternalStorageDirectory().getAbsolutePath();\n'
+    '                        // [涛影] 规范化路径，禁止 ../ 跳出外部存储根目录\n'
+    '                        String file = new File(root, f).getCanonicalPath();\n'
+    '                        if (!file.startsWith(root)) {\n'
+    '                            return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.FORBIDDEN, NanoHTTPD.MIME_PLAINTEXT, "forbidden");\n'
+    '                        }',
+    required=False,
+)
+rs.save()
+
+# ----------------------------------------------------------------------------
 # 5. 工程配置
 # ----------------------------------------------------------------------------
 root_gradle = ROOT / "build.gradle"
