@@ -36,6 +36,10 @@ BUILD_DATE = os.environ.get("BUILD_DATE", "20260101")
 VERSION_CODE = os.environ.get("VERSION_CODE", "2026010100")
 ENABLE_DESUGAR = os.environ.get("ENABLE_DESUGAR", "false").lower() == "true"
 
+INJECT_IJK = (
+    "{\"options\":[{\"name\":\"opensles\",\"category\":4,\"value\":\"0\"},{\"name\":\"framedrop\",\"category\":4,\"value\":\"1\"},{\"name\":\"soundtouch\",\"category\":4,\"value\":\"1\"},{\"name\":\"start-on-prepared\",\"category\":4,\"value\":\"1\"},{\"name\":\"http-detect-rangeupport\",\"category\":1,\"value\":\"0\"},{\"name\":\"fflags\",\"category\":1,\"value\":\"fastseek\"},{\"name\":\"skip_loop_filter\",\"category\":2,\"value\":\"48\"},{\"name\":\"reconnect\",\"category\":4,\"value\":\"1\"},{\"name\":\"enable-accurate-seek\",\"category\":4,\"value\":\"0\"},{\"name\":\"mediacodec\",\"category\":4,\"value\":\"0\"},{\"name\":\"mediacodec-all-videos\",\"category\":4,\"value\":\"0\"},{\"name\":\"mediacodec-auto-rotate\",\"category\":4,\"value\":\"0\"},{\"name\":\"mediacodec-handle-resolution-change\",\"category\":4,\"value\":\"0\"},{\"name\":\"mediacodec-hevc\",\"category\":4,\"value\":\"0\"},{\"name\":\"max-buffer-size\",\"category\":4,\"value\":\"8388608\"},{\"name\":\"probesize\",\"category\":1,\"value\":\"1048576\"},{\"name\":\"analyzeduration\",\"category\":1,\"value\":\"2000000\"}],\"group\":\"软解码·秒开\"},{\"options\":[{\"name\":\"opensles\",\"category\":4,\"value\":\"0\"},{\"name\":\"framedrop\",\"category\":4,\"value\":\"1\"},{\"name\":\"soundtouch\",\"category\":4,\"value\":\"1\"},{\"name\":\"start-on-prepared\",\"category\":4,\"value\":\"1\"},{\"name\":\"http-detect-rangeupport\",\"category\":1,\"value\":\"0\"},{\"name\":\"fflags\",\"category\":1,\"value\":\"fastseek\"},{\"name\":\"skip_loop_filter\",\"category\":2,\"value\":\"48\"},{\"name\":\"reconnect\",\"category\":4,\"value\":\"1\"},{\"name\":\"enable-accurate-seek\",\"category\":4,\"value\":\"0\"},{\"name\":\"mediacodec\",\"category\":4,\"value\":\"1\"},{\"name\":\"mediacodec-all-videos\",\"category\":4,\"value\":\"1\"},{\"name\":\"mediacodec-auto-rotate\",\"category\":4,\"value\":\"1\"},{\"name\":\"mediacodec-handle-resolution-change\",\"category\":4,\"value\":\"1\"},{\"name\":\"mediacodec-hevc\",\"category\":4,\"value\":\"1\"},{\"name\":\"max-buffer-size\",\"category\":4,\"value\":\"8388608\"},{\"name\":\"probesize\",\"category\":1,\"value\":\"1048576\"},{\"name\":\"analyzeduration\",\"category\":1,\"value\":\"2000000\"}],\"group\":\"硬解码·秒开\"}"
+)
+
 done, skipped, failed = [], [], []
 
 
@@ -444,6 +448,29 @@ try:
     pm.save()
 except SystemExit:
     skipped.append("player 模块清单不存在，跳过权限收敛")
+
+# ----------------------------------------------------------------------------
+# 4.9 IJK 起播加速参数（2026-10-24）
+# ----------------------------------------------------------------------------
+# 上游默认两组（软/硬解码）都缺 probesize 和 analyzeduration，ffmpeg 走默认值
+# probesize=5MB / analyzeduration=5s，探测流信息慢，直播起播就慢。
+# 这里在原两组之后追加「软解码·秒开」「硬解码·秒开」两组（原两组完全不动，可回退）：
+#   probesize       1MB（默认 5MB）
+#   analyzeduration 2s（默认 5s）
+#   max-buffer-size 8MB（默认 15MB）
+# 追加在数组末尾，ijkCodes.get(0) 兜底仍是原来的「软解码」，老用户行为不变。
+try:
+    ac = Doc("app/src/main/java/com/github/tvbox/osc/api/ApiConfig.java")
+    ac.replace(
+        "IJK 秒开参数组",
+        '\\"group\\":\\"硬解码\\"}]',
+        '\\"group\\":\\"硬解码\\"},' + INJECT_IJK + ']',
+        required=False,
+        expect=1,
+    )
+    ac.save()
+except SystemExit:
+    skipped.append("ApiConfig.java 不存在，跳过 IJK 参数")
 
 # ----------------------------------------------------------------------------
 # 5. 工程配置
