@@ -428,6 +428,24 @@ lp2.replace(
 lp2.save()
 
 # ----------------------------------------------------------------------------
+# 4.8 权限收敛（2026-10-24）
+# ----------------------------------------------------------------------------
+# READ_PHONE_STATE 只在 player 模块的清单里声明，代码仅用到 TelephonyManager.getPhoneType()
+# 和 NETWORK_TYPE_* 常量，两者都不需要该权限。机顶盒更没有电话功能，移除可少一个敏感权限。
+try:
+    pm = Doc("player/src/main/AndroidManifest.xml")
+    pm.replace(
+        "移除 READ_PHONE_STATE",
+        '    <uses-permission android:name="android.permission.READ_PHONE_STATE" />\n',
+        "",
+        required=False,
+        expect=None,
+    )
+    pm.save()
+except SystemExit:
+    skipped.append("player 模块清单不存在，跳过权限收敛")
+
+# ----------------------------------------------------------------------------
 # 5. 工程配置
 # ----------------------------------------------------------------------------
 root_gradle = ROOT / "build.gradle"
