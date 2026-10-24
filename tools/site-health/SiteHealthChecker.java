@@ -68,7 +68,8 @@ public final class SiteHealthChecker {
                     @Override
                     public void run() {
                         try {
-                            run(ctx.getApplicationContext());
+                            // 必须写全类名：此处 run(...) 会被解析成匿名 Runnable 自己的无参 run()
+                            SiteHealthChecker.run(ctx.getApplicationContext());
                         } catch (Throwable ignored) {
                         }
                     }
