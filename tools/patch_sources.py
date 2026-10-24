@@ -464,7 +464,7 @@ try:
     ac.replace(
         "IJK 秒开参数组",
         '\\"group\\":\\"硬解码\\"}]',
-        '\\"group\\":\\"硬解码\\"},' + INJECT_IJK + ']',
+        '\\"group\\":\\"硬解码\\"},' + INJECT_IJK.replace('"', '\\"') + ']',
         required=False,
         expect=1,
     )
