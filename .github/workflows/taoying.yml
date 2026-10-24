@@ -143,16 +143,22 @@ jobs:
           echo "$BAD" | grep -q "package: name='com.taoying.app'" || { echo "::error::包名不正确"; exit 1; }
           echo "$BAD" | grep -Eq "(sdkVersion|minSdkVersion):'19'" || { echo "::error::minSdk 不是 19"; exit 1; }
           echo "$BAD" | grep -q "native-code: .*arm64-v8a"        || { echo "::error::通用包缺 arm64"; exit 1; }
-          "$BT/apksigner" verify --print-certs "$UNI" | grep -q "v1 scheme (JAR signing): true" \
+          # v1 签名用「APK 里有没有 META-INF/*.SF」判断，比解析 apksigner 文案可靠
+          unzip -l "$UNI" | grep -q "META-INF/.*\.SF" \
             || { echo "::error::缺 v1 签名，Android 4.4 无法安装"; exit 1; }
+          "$BT/apksigner" verify --print-certs "$UNI" > /tmp/sig_uni.log 2>&1 \
+            || { cat /tmp/sig_uni.log; echo "::error::签名校验失败"; exit 1; }
+          grep -E "v1 scheme|v2 scheme|v3 scheme" /tmp/sig_uni.log || true
 
           cp -f "$UNI" "apk/TaoYing_${tag}_universal.apk"
           if [ -n "$A32" ]; then
             BAD32=$("$BT/aapt2" dump badging "$A32")
             echo "$BAD32" | grep -Eq "(sdkVersion|minSdkVersion):'19'" || { echo "::error::armv7 包 minSdk 异常"; exit 1; }
             echo "$BAD32" | grep -q "native-code: 'armeabi-v7a'" || { echo "::error::armv7 包架构异常"; exit 1; }
-            "$BT/apksigner" verify --print-certs "$A32" | grep -q "v1 scheme (JAR signing): true" \
+            unzip -l "$A32" | grep -q "META-INF/.*\.SF" \
               || { echo "::error::armv7 包缺 v1 签名"; exit 1; }
+            "$BT/apksigner" verify "$A32" > /dev/null 2>&1 \
+              || { echo "::error::armv7 包签名校验失败"; exit 1; }
             cp -f "$A32" "apk/TaoYing_${tag}_arm32.apk"
           fi
 
