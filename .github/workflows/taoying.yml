@@ -48,16 +48,25 @@ jobs:
         uses: actions/checkout@v4
 
       # 记录上游 commit，便于事后定位「这批包是基于哪个上游版本」，也可据此回退
+      # 版本号规则：同一天多次构建按 v1、v2、v3 递增，外部一眼能看出迭代次序
+      #   tag        taoying-261024v3
+      #   versionName 1.0.0-taoying-261024v3
+      #   versionCode 261024003（天×1000+序号，保证比旧的 26102409 大，可覆盖安装）
       - name: Clone upstream source
         run: |
           set -e
           git clone --depth 1 https://github.com/q215613905/TVBoxOS TVBoxOSC
           UPSTREAM=$(git -C TVBoxOSC rev-parse --short HEAD)
+          DAY=$(TZ=Asia/Shanghai date +%y%m%d)
+          EXIST=$(git ls-remote --tags origin 2>/dev/null | sed 's#.*refs/tags/##' | grep -c "^taoying-${DAY}v" || true)
+          SEQ=$((EXIST + 1))
           echo "UPSTREAM_SHA=$UPSTREAM" >> $GITHUB_ENV
-          echo "tag=taoying-$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
-          echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
-          echo "VERSION_CODE=$(date +%y%m%d%H)" >> $GITHUB_ENV
+          echo "tag=taoying-${DAY}v${SEQ}" >> $GITHUB_ENV
+          echo "SHORT=${DAY}v${SEQ}" >> $GITHUB_ENV
+          echo "BUILD_DATE=${DAY}v${SEQ}" >> $GITHUB_ENV
+          echo "VERSION_CODE=$((10#$DAY * 1000 + SEQ))" >> $GITHUB_ENV
           echo "上游版本: $UPSTREAM"
+          echo "本次版本: 261024 系列第 $SEQ 个 → ${DAY}v${SEQ}（code $((10#$DAY * 1000 + SEQ))）"
           echo "应用: $APP_NAME ($APP_ID)"
           echo "内置源: $API_URL"
 
@@ -150,7 +159,7 @@ jobs:
             || { cat /tmp/sig_uni.log; echo "::error::签名校验失败"; exit 1; }
           grep -E "v1 scheme|v2 scheme|v3 scheme" /tmp/sig_uni.log || true
 
-          cp -f "$UNI" "apk/TaoYing_${tag}_universal.apk"
+          cp -f "$UNI" "apk/TaoYing_${SHORT}_universal.apk"
           if [ -n "$A32" ]; then
             BAD32=$("$BT/aapt2" dump badging "$A32")
             echo "$BAD32" | grep -Eq "(sdkVersion|minSdkVersion):'19'" || { echo "::error::armv7 包 minSdk 异常"; exit 1; }
@@ -159,7 +168,7 @@ jobs:
               || { echo "::error::armv7 包缺 v1 签名"; exit 1; }
             "$BT/apksigner" verify "$A32" > /dev/null 2>&1 \
               || { echo "::error::armv7 包签名校验失败"; exit 1; }
-            cp -f "$A32" "apk/TaoYing_${tag}_arm32.apk"
+            cp -f "$A32" "apk/TaoYing_${SHORT}_arm32.apk"
           fi
 
           echo "== 产物 =="
@@ -198,10 +207,16 @@ jobs:
             - `*_arm32.apk`：仅 armeabi-v7a，体积小约 13 MB，**安卓 4.4 老机顶盒优先装这个**
 
             ### 本版改动
-            - 移除代码零引用的 cronet 依赖（省约 4 MB，减少 4.4 上的未知风险）
-            - EPG 数据解析、播放缓存清理移出主线程（缩短首屏时间）
-            - versionCode 改为日期号，修复长期恒为 1 无法判断新旧的问题
-            - 新增构建期断言：包名 / minSdk / 架构 / v1 签名，任一不符即中止出包
+            - **直播源**：只保留央视 + 31 个省级卫视（体育、电影、城市台已剔除）；同一频道 IPv6 线路排在最前，连不上时 App 会在 3–10 秒内自动切下一条
+            - **修复 EPG 变慢**：去掉 m3u 里的 `x-tvg-url`，改回按频道查询（每次几 KB），不再每个台都去下 922 KB 的全量节目表
+            - **全屏返回**：播放控制条新增「‹ 返回」按钮，点一下直接回到频道列表
+            - **关于页**：精简文案，保留原版出处，标注二次封装
+            - **点播源自检**：每 3 天自动体检一次，结果写到 `files/site-health.json`
+            - 移除代码零引用的 cronet 依赖（省约 4 MB）
+            - 构建期断言：包名 / minSdk / 架构 / v1 签名，任一不符即中止出包
+
+            ### 版本号规则
+            同一天多次构建依次为 `261024v1`、`261024v2`、`261024v3`…，versionCode 为「天×1000+序号」。
 
             > 回退方式：装回上一个 tag 的 APK 即可（同签名可覆盖安装）。
           allowUpdates: true

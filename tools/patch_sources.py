@@ -363,6 +363,71 @@ except Exception as e:
     skipped.append("站点自检注入失败：%s" % e)
 
 # ----------------------------------------------------------------------------
+# 4.7 界面与文案（2026-10-24）
+# ----------------------------------------------------------------------------
+
+# 4.7.1 关于页：精简 + 保留原版出处 + 标注二次封装
+ab = Doc("app/src/main/res/layout/dialog_about.xml")
+ab.replace(
+    "关于页文案",
+    '本软件只提供聚合展示功能，所有资源来自网上, 软件不参与任何制作, 上传, 储存, 下载等内容. '
+    '软件仅供学习参考, 请于安装后24小时内删除。\\n\\n打包分发请保留出处\\n'
+    'https://github.com/CatVodTVOfficial/TVBoxOSC\\nhttps://github.com/q215613905/TVBoxOS',
+    '涛影 · 涛声依旧　　二次封装：涛声依旧\\n\\n'
+    '基于 TVBox 开源项目修改，感谢原作者\\n'
+    'https://github.com/CatVodTVOfficial/TVBoxOSC\\n'
+    'https://github.com/q215613905/TVBoxOS\\n\\n'
+    '仅聚合展示网络公开内容，不制作、不上传、不存储任何资源。\\n'
+    '仅供学习参考，请于安装后 24 小时内删除。',
+    required=False,
+)
+ab.save()
+
+# 4.7.2 全屏播放：控制条加「返回」按钮（点它回到频道列表，不占画面）
+lay = Doc("app/src/main/res/layout/activity_live_play.xml")
+BACK_BTN = (
+    '\t\t\t<TextView\n'
+    '\t\t\t\tandroid:id="@+id/tv_back_live"\n'
+    '\t\t\t\tandroid:layout_width="wrap_content"\n'
+    '\t\t\t\tandroid:layout_height="30dp"\n'
+    '\t\t\t\tandroid:layout_marginEnd="6dp"\n'
+    '\t\t\t\tandroid:gravity="center"\n'
+    '\t\t\t\tandroid:paddingStart="8dp"\n'
+    '\t\t\t\tandroid:paddingEnd="8dp"\n'
+    '\t\t\t\tandroid:text="‹ 返回"\n'
+    '\t\t\t\tandroid:textColor="#ffffff"\n'
+    '\t\t\t\tandroid:textSize="14dp" />\n\n'
+)
+lay.replace(
+    "直播控制条加返回按钮",
+    '\t\t\t<ImageView\n\t\t\t\tandroid:id="@+id/iv_playpause"',
+    BACK_BTN + '\t\t\t<ImageView\n\t\t\t\tandroid:id="@+id/iv_playpause"',
+    required=False,
+)
+lay.save()
+
+# 4.7.3 绑定返回按钮：显示频道列表（该列表本来就会自动隐藏，不干扰观看）
+lp2 = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
+lp2.replace(
+    "绑定返回按钮",
+    "        iv_playpause = findViewById(R.id.iv_playpause);",
+    "        iv_playpause = findViewById(R.id.iv_playpause);\n"
+    "        // [涛影] 全屏播放时的返回入口：点它显示频道列表，几秒后自动隐藏\n"
+    "        View tyBackBtn = findViewById(R.id.tv_back_live);\n"
+    "        if (tyBackBtn != null) {\n"
+    "            tyBackBtn.setOnClickListener(new View.OnClickListener() {\n"
+    "                @Override\n"
+    "                public void onClick(View v) {\n"
+    "                    iv_play.setVisibility(View.INVISIBLE);\n"
+    "                    divLoadEpgLeft(null);\n"
+    "                }\n"
+    "            });\n"
+    "        }",
+    required=False,
+)
+lp2.save()
+
+# ----------------------------------------------------------------------------
 # 5. 工程配置
 # ----------------------------------------------------------------------------
 root_gradle = ROOT / "build.gradle"
