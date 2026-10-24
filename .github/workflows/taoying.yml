@@ -10,7 +10,7 @@ on:
       app_name:
         description: '应用显示名称'
         required: false
-        default: '涛影'
+        default: '观影听涛'
       api_url:
         description: '内置订阅源URL（App内仍可随时更换；留空则用默认高天流云源）'
         required: false
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     env:
-      APP_NAME: ${{ inputs.app_name || '涛影' }}
+      APP_NAME: ${{ inputs.app_name || '观影听涛' }}
       API_URL: ${{ inputs.api_url || 'https://gh.74259136.xyz/https://raw.githubusercontent.com/st800820/TVBoxOSC/master/taoying/config.json' }}
       APP_ID: com.taoying.app
       ENABLE_DESUGAR: 'false'

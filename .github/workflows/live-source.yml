@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -25,10 +25,19 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 生成直播源
+      - name: 拉 Guovin 当天结果
         run: |
           python tools/live/make_live.py --outdir live
-          echo "--- 结果 ---"
+          grep -c "^#EXTINF" live/taoying-live.m3u || true
+
+      # 用固定源池 + 当天结果合并，逐台实测 TTFB，只留最快的 3 条
+      - name: 逐台测速精选
+        run: |
+          python tools/live/build_pool.py \
+            --pool live/source-pool.txt \
+            --current live/taoying-live.m3u \
+            --outdir live
+          echo "--- 精选结果 ---"
           grep -c "^#EXTINF" live/taoying-live.m3u || true
           ls -lh live/
 

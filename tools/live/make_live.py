@@ -50,6 +50,10 @@ PROV_ORDER = ["北京", "天津", "河北", "山西", "内蒙古", "辽宁", "�
               "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆"]
 
 
+# 31 个省级（东方=上海，东南=福建 合并计一个）
+PROV31 = [p for p in PROV_ORDER if p not in ("东方", "东南")]
+
+
 def fetch(url, proxy="", timeout=60):
     target = (proxy + url) if proxy else url
     req = urllib.request.Request(target, headers={"User-Agent": "taoying-live/2.0"})

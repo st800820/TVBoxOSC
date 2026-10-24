@@ -189,12 +189,17 @@ a.replace(
     "内置订阅源注入",
     "Hawk.init(this).build();",
     "Hawk.init(this).build();\n"
-    '        // [涛影] 内置源：首次写入；若仍是旧内置源（gao/ghproxy），升级时自动迁移到自托管配置\n'
+    '        // [观影听涛] 内置源：首次写入；若仍是旧内置源（gao/ghproxy），升级时自动迁移到自托管配置\n'
     '        String tyApi = Hawk.get(HawkConfig.API_URL, "");\n'
     '        if (tyApi.isEmpty() || tyApi.contains("gaotianliuyun/gao") || tyApi.contains("ghproxy.net")) {\n'
     f'            Hawk.put(HawkConfig.API_URL, "{API_URL}");\n'
     '        }\n'
-    '        // [涛影] 直播默认 IJK 硬解：EXO 在 4.4 老盒子上播 HLS 常黑屏（点播仍用 EXO，不动）\n'
+    '        // [观影听涛] 锁定最优设置：每次启动强制写入，避免误调导致变慢\n'
+    '        Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 1);\n'
+    '        Hawk.put(HawkConfig.IJK_CODEC, "硬解码·秒开");\n'
+    '        Hawk.put(HawkConfig.IJK_CACHE_PLAY, false);\n'
+    '        Hawk.put(HawkConfig.DANMU_OPEN, false);\n'
+    '        // [观影听涛] 直播默认 IJK 硬解：EXO 在 4.4 老盒子上播 HLS 常黑屏（点播仍用 EXO，不动）\n'
     '        if (!Hawk.contains(HawkConfig.LIVE_PLAY_TYPE)) { Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 1); }\n'
     '        if (!Hawk.contains(HawkConfig.IJK_CODEC)) { Hawk.put(HawkConfig.IJK_CODEC, "\u786c\u89e3\u7801"); }',
     expect=1,
@@ -219,7 +224,7 @@ if "private static void startAsync" not in a.text:
     a.replace(
         "后台任务工具方法",
         "    private void initParams() {",
-        "    // [涛影] 轻量后台线程：把纯 IO / JSON 解析类初始化挪出主线程，缩短首屏时间\n"
+        "    // [观影听涛] 轻量后台线程：把纯 IO / JSON 解析类初始化挪出主线程，缩短首屏时间\n"
         "    private static void startAsync(String name, Runnable task) {\n"
         "        Thread t = new Thread(task, name);\n"
         "        t.setPriority(Thread.MIN_PRIORITY);\n"
@@ -287,7 +292,7 @@ lp.replace(
     '        objectAnimator.setDuration(postTimeout);\n'
     '        objectAnimator.setRepeatCount(-1);\n'
     '        objectAnimator.start();',
-    "        // [涛影] 台标固定不旋转：省掉持续重绘，也避免方图旋转时的白边",
+    "        // [观影听涛] 台标固定不旋转：省掉持续重绘，也避免方图旋转时的白边",
     required=False,
 )
 lp.save()
@@ -323,7 +328,7 @@ rs.replace(
     '                        String file = root + "/" + f;',
     '                        String f = fileName.substring(6);\n'
     '                        String root = Environment.getExternalStorageDirectory().getAbsolutePath();\n'
-    '                        // [涛影] 规范化路径，禁止 ../ 跳出外部存储根目录\n'
+    '                        // [观影听涛] 规范化路径，禁止 ../ 跳出外部存储根目录\n'
     '                        String file = new File(root, f).getCanonicalPath();\n'
     '                        if (!file.startsWith(root)) {\n'
     '                            return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.FORBIDDEN, NanoHTTPD.MIME_PLAINTEXT, "forbidden");\n'
@@ -348,7 +353,7 @@ try:
             "站点自检入口",
             "    protected void init() {",
             "    protected void init() {\n"
-            "        // [涛影] 每 N 天自动跑一次点播源自检，结果写 files/site-health.json\n"
+            "        // [观影听涛] 每 N 天自动跑一次点播源自检，结果写 files/site-health.json\n"
             "        com.github.tvbox.osc.util.health.SiteHealthChecker.schedule(this);",
             required=False,
         )
@@ -385,6 +390,15 @@ ab.replace(
     '仅供学习参考，请于安装后 24 小时内删除。',
     required=False,
 )
+# 直接改写文案：兼容上游原文变动，找不到原文时也能生效
+ab.text = ab.text.replace(
+    '涛影 · 涛声依旧　　二次封装：涛声依旧',
+    f'观影听涛　　二次封装：涛声依旧\\n版本 {BUILD_DATE}'
+)
+ab.text = ab.text.replace(
+    '本软件只提供聚合展示功能，所有资源来自网上, 软件不参与任何制作, 上传, 储存, 下载等内容. 软件仅供学习参考, 请于安装后24小时内删除。',
+    f'版本 {BUILD_DATE}     二次封装：涛声依旧',
+)
 ab.save()
 
 # 4.7.2 全屏播放：控制条加「返回」按钮（点它回到频道列表，不占画面）
@@ -416,7 +430,7 @@ lp2.replace(
     "绑定返回按钮",
     "        iv_playpause = findViewById(R.id.iv_playpause);",
     "        iv_playpause = findViewById(R.id.iv_playpause);\n"
-    "        // [涛影] 全屏播放时的返回入口：点它显示频道列表，几秒后自动隐藏\n"
+    "        // [观影听涛] 全屏播放时的返回入口：点它显示频道列表，几秒后自动隐藏\n"
     "        View tyBackBtn = findViewById(R.id.tv_back_live);\n"
     "        if (tyBackBtn != null) {\n"
     "            tyBackBtn.setOnClickListener(new View.OnClickListener() {\n"
