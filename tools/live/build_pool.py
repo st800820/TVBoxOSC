@@ -34,9 +34,9 @@ CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
 # 每台从大池子里抽多少条去测（越大越准，越慢）
-SAMPLE_PER_CHANNEL = 12
+SAMPLE_PER_CHANNEL = 20
 # 每台最终保留几条
-KEEP_PER_CHANNEL = 3
+KEEP_PER_CHANNEL = 4
 
 
 def parse_m3u(text):
@@ -107,8 +107,15 @@ def main():
         print(f"  {tag}: {len(items)} 条 → 命中央视/卫视 {n} 条")
 
     print("== 读取源 ==")
-    add(a.pool, "抓包大池")
-    add(a.current, "当前在用")
+    pool_n = add(a.pool, "抓包大池")
+    cur_n = add(a.current, "当前在用")
+
+    # 安全阀：源池格式不对（比如只有 URL 没有 #EXTINF）时命中会是 0，
+    # 这种情况绝不能继续，否则会把好的 m3u 覆盖成只剩几条
+    if pool_n == 0:
+        print("!! 源池命中 0 条：检查 %s 是否为带 #EXTINF 的 m3u 格式" % a.pool)
+        print("!! 已中止，未覆盖任何输出文件")
+        return 2
 
     print(f"\n== 频道 {len(buckets)} 个，开始抽样测速（每台最多 {SAMPLE_PER_CHANNEL} 条）==")
     picked = {}

@@ -199,6 +199,9 @@ a.replace(
     '        Hawk.put(HawkConfig.IJK_CODEC, "硬解码·秒开");\n'
     '        Hawk.put(HawkConfig.IJK_CACHE_PLAY, false);\n'
     '        Hawk.put(HawkConfig.DANMU_OPEN, false);\n'
+    '        // [观影听涛] 片源广告过滤默认开启：拦截 m3u8 里插播的广告分片（棋牌/博彩类常见）\n'
+    '        // 只在没设过时写 true，用户仍可在 设置→播放器 里手动关闭（个别片源过滤后起播失败时用）\n'
+    '        if (!Hawk.contains(HawkConfig.M3U8_PURIFY)) { Hawk.put(HawkConfig.M3U8_PURIFY, true); }\n'
     '        // [观影听涛] 直播默认 IJK 硬解：EXO 在 4.4 老盒子上播 HLS 常黑屏（点播仍用 EXO，不动）\n'
     '        if (!Hawk.contains(HawkConfig.LIVE_PLAY_TYPE)) { Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 1); }\n'
     '        if (!Hawk.contains(HawkConfig.IJK_CODEC)) { Hawk.put(HawkConfig.IJK_CODEC, "\u786c\u89e3\u7801"); }',
