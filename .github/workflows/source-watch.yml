@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       config_url:
-        description: '要巡检的配置地址（默认内置源）'
+        description: '要巡检的配置（默认巡检仓库内 taoying/config.json）'
         required: false
-        default: 'https://raw.githubusercontent.com/gaotianliuyun/gao/master/0821.json'
+        default: 'taoying/config.json'
 
 permissions:
   contents: read
@@ -29,7 +29,7 @@ jobs:
       - name: 巡检
         id: check
         env:
-          CFG: ${{ inputs.config_url || 'https://raw.githubusercontent.com/gaotianliuyun/gao/master/0821.json' }}
+          CFG: ${{ inputs.config_url || 'taoying/config.json' }}
         run: |
           set +e
           python tools/source-health/check_sources.py --config "$CFG" --json report.json | tee summary.txt
@@ -50,6 +50,7 @@ jobs:
 
       - name: 有异常时开 issue
         if: steps.check.outputs.exit_code != '0'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -57,18 +58,18 @@ jobs:
             const body = '自动巡检发现订阅源异常，请查看并决定是否换源。\n\n```\n' +
               (fs.existsSync('summary.txt') ? fs.readFileSync('summary.txt', 'utf8') : '无输出') + '\n```';
             const title = '[巡检] 订阅源异常 ' + new Date().toISOString().slice(0, 10);
-            const list = await github.rest.issues.listForRepo({
-              owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'source-watch'
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100
             });
-            if (list.data.length) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo, issue_number: list.data[0].number, body
-              });
-            } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ['source-watch']
-              });
+            // 已有未关闭的巡检 issue 就不再刷新的，避免每天一堆重复
+            if (open.data.some(i => i.title.startsWith('[巡检] 订阅源异常'))) {
+              console.log('已有未关闭的巡检 issue，跳过');
+              return;
             }
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo, title, body
+            });
+            console.log('已创建 issue: ' + title);
 
       - name: 上传巡检报告
         if: always()

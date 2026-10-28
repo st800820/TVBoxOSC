@@ -117,7 +117,12 @@ def main():
     local = os.path.join(here, "..", "..", "04_源码与参考", "订阅源备份", "0821.json")
     src = a.config
 
-    if src:
+    if src and os.path.exists(src):
+        # 支持直接指本地文件（CI 里用仓库内的 taoying/config.json，避免依赖外网）
+        cfg = json.load(open(src, encoding="utf-8"))
+        base = a.base
+        print(f"配置来源：本地文件 {src}")
+    elif src:
         code, size, body, dt = get(src, 4_000_000)
         if code != 200:
             print(f"[FATAL] 配置拉不到：{src}（HTTP {code}）")

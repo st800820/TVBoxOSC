@@ -199,6 +199,9 @@ a.replace(
     '        Hawk.put(HawkConfig.IJK_CODEC, "硬解码·秒开");\n'
     '        Hawk.put(HawkConfig.IJK_CACHE_PLAY, false);\n'
     '        Hawk.put(HawkConfig.DANMU_OPEN, false);\n'
+    '        // [观影听涛] 首页分类网格走采集站（按更新时间倒序 = 最新）；热播横条另由豆瓣填充\n'
+    '        String tyHome = Hawk.get(HawkConfig.HOME_API, "");\n'
+    '        if (tyHome.isEmpty() || "豆豆".equals(tyHome)) { Hawk.put(HawkConfig.HOME_API, "暴風"); }\n'
     '        // [观影听涛] 片源广告过滤默认开启：拦截 m3u8 里插播的广告分片（棋牌/博彩类常见）\n'
     '        // 只在没设过时写 true，用户仍可在 设置→播放器 里手动关闭（个别片源过滤后起播失败时用）\n'
     '        if (!Hawk.contains(HawkConfig.M3U8_PURIFY)) { Hawk.put(HawkConfig.M3U8_PURIFY, true); }\n'
@@ -488,6 +491,74 @@ try:
     ac.save()
 except SystemExit:
     skipped.append("ApiConfig.java 不存在，跳过 IJK 参数")
+
+# ----------------------------------------------------------------------------
+# 4.10 首页双列表（热播走豆瓣 / 分类网格走采集站）
+# ----------------------------------------------------------------------------
+try:
+    _src = pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")) / "tools/site-health/HomeHotDouban.java"
+    if _src.exists():
+        _dst = ROOT / "app/src/main/java/com/github/tvbox/osc/util/HomeHotDouban.java"
+        _dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_src, _dst)
+        done.append("注入 HomeHotDouban")
+
+        _ha = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/HomeActivity.java")
+        _ha.replace(
+            "首页热播条加载豆瓣",
+            '            mViewPager.setCurrentItem(currentSelected, false);\n        }\n    }',
+            '            mViewPager.setCurrentItem(currentSelected, false);\n        }\n'
+            '        // [观影听涛] 热播横条固定走豆瓣（有评分）；分类网格仍是首页数据源（最新）\n'
+            '        mHandler.postDelayed(new Runnable() {\n'
+            '            @Override\n'
+            '            public void run() {\n'
+            '                com.github.tvbox.osc.util.HomeHotDouban.load(HomeActivity.this);\n'
+            '            }\n'
+            '        }, 1500);\n'
+            '    }',
+            required=False,
+            expect=1,
+        )
+        _ha.replace(
+            "首页分类 tab 上限 13",
+            '    private void updateSortData(List<MovieSort.SortData> newSortData) {\n'
+            '        if (newSortData == null) {\n'
+            '            newSortData = new ArrayList<>();\n'
+            '        }',
+            '    private void updateSortData(List<MovieSort.SortData> newSortData) {\n'
+            '        if (newSortData == null) {\n'
+            '            newSortData = new ArrayList<>();\n'
+            '        }\n'
+            '        // [观影听涛] 采集站分类动辄 50+，只留前 12 个，避免顶部 tab 太长\n'
+            '        if (newSortData.size() > 13) {\n'
+            '            newSortData = new ArrayList<>(newSortData.subList(0, 13));\n'
+            '        }',
+            required=False,
+            expect=1,
+        )
+        _ha.replace(
+            "热播条不被站点列表覆盖",
+            '        if (absXml == null || absXml.videoList == null || UserFragment.homeHotVodAdapter == null) return;',
+            '        if (com.github.tvbox.osc.util.HomeHotDouban.enabled()) return; // [观影听涛] 热播条由豆瓣填充\n'
+            '        if (absXml == null || absXml.videoList == null || UserFragment.homeHotVodAdapter == null) return;',
+            required=False,
+            expect=1,
+        )
+        _ha.save()
+
+        _uf = Doc("app/src/main/java/com/github/tvbox/osc/ui/fragment/UserFragment.java")
+        _uf.replace(
+            "热播条标题固定豆瓣",
+            'homeSourceRec!=null?"站点推荐":"豆瓣热播"',
+            '"豆瓣热播"',
+            required=False,
+            expect=1,
+        )
+        _uf.save()
+    else:
+        skipped.append("缺少 tools/site-health/HomeHotDouban.java")
+except Exception as _e:
+    skipped.append("首页双列表处理失败：%s" % _e)
 
 # ----------------------------------------------------------------------------
 # 5. 工程配置
