@@ -566,14 +566,6 @@
       ]
     },
     {
-      "key": "haiwaikan",
-      "name": "海外看┃采集",
-      "type": 1,
-      "api": "https://haiwaikan.com/api.php/provide/vod",
-      "searchable": 1,
-      "changeable": 1
-    },
-    {
       "key": "暴風",
       "name": "暴風┃采集",
       "type": 1,
@@ -586,14 +578,6 @@
       "name": "索尼┃采集",
       "type": 1,
       "api": "https://suoniapi.com/api.php/provide/vod",
-      "searchable": 1,
-      "changeable": 1
-    },
-    {
-      "key": "快帆",
-      "name": "快帆┃采集",
-      "type": 1,
-      "api": "https://api.kuaifan.tv/api.php/provide/vod",
       "searchable": 1,
       "changeable": 1
     },
@@ -700,14 +684,6 @@
       "ext": "./js/虎牙直播.js"
     },
     {
-      "key": "drpy_js_童趣",
-      "name": "少儿┃童趣[js]",
-      "type": 3,
-      "api": "./lib/drpy2.min.js",
-      "changeable": 0,
-      "ext": "./js/童趣.js"
-    },
-    {
       "key": "drpy_js_兔小贝",
       "name": "少儿┃兔小贝[js]",
       "type": 3,
@@ -721,13 +697,6 @@
       "type": 3,
       "api": "./lib/drpy2.min.js",
       "ext": "./js/AnFuns.js"
-    },
-    {
-      "key": "drpy_js_NT动漫",
-      "name": "动漫┃NT动漫[js]",
-      "type": 3,
-      "api": "./lib/drpy2.min.js",
-      "ext": "./js/NT动漫.js"
     },
     {
       "key": "drpy_js_NyaFun",
@@ -1427,6 +1396,37 @@
       "filterable": "1",
       "changeable": 0,
       "ext": "./json/alist.json"
+    },
+    {
+      "key": "haiwaikan",
+      "name": "海外看┃采集",
+      "type": 1,
+      "api": "https://haiwaikan.com/api.php/provide/vod",
+      "searchable": 1,
+      "changeable": 1
+    },
+    {
+      "key": "快帆",
+      "name": "快帆┃采集",
+      "type": 1,
+      "api": "https://api.kuaifan.tv/api.php/provide/vod",
+      "searchable": 1,
+      "changeable": 1
+    },
+    {
+      "key": "drpy_js_童趣",
+      "name": "少儿┃童趣[js]",
+      "type": 3,
+      "api": "./lib/drpy2.min.js",
+      "changeable": 0,
+      "ext": "./js/童趣.js"
+    },
+    {
+      "key": "drpy_js_NT动漫",
+      "name": "动漫┃NT动漫[js]",
+      "type": 3,
+      "api": "./lib/drpy2.min.js",
+      "ext": "./js/NT动漫.js"
     }
   ]
 }
