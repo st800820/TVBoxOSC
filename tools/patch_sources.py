@@ -195,7 +195,7 @@ a.replace(
     f'            Hawk.put(HawkConfig.API_URL, "{API_URL}");\n'
     '        }\n'
     '        // [观影听涛] 锁定最优设置：每次启动强制写入，避免误调导致变慢\n'
-    '        Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 1);\n'
+    '        Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 2);  // [观影听涛] 直播先用 EXO：IJK 硬解不支持该源 profile 时会干等 10 秒才换\n'
     '        Hawk.put(HawkConfig.IJK_CODEC, "硬解码·秒开");\n'
     '        Hawk.put(HawkConfig.IJK_CACHE_PLAY, false);\n'
     '        Hawk.put(HawkConfig.DANMU_OPEN, false);\n'
@@ -529,9 +529,26 @@ try:
             '        if (newSortData == null) {\n'
             '            newSortData = new ArrayList<>();\n'
             '        }\n'
-            '        // [观影听涛] 采集站分类动辄 50+，只留前 12 个，避免顶部 tab 太长\n'
-            '        if (newSortData.size() > 13) {\n'
-            '            newSortData = new ArrayList<>(newSortData.subList(0, 13));\n'
+            '        // [观影听涛] 采集站分类 50+：按大类优先排序后只留 12 个，避免 tab 全是电影子类\n'
+            '        if (newSortData.size() > 1) {\n'
+            '            String[] tyCat = {"电影", "电视剧", "综艺", "动漫", "纪录片", "短剧", "体育", "少儿"};\n'
+            '            List<MovieSort.SortData> tyRest = new ArrayList<>();\n'
+            '            for (int tyI = 1; tyI < newSortData.size(); tyI++) tyRest.add(newSortData.get(tyI));\n'
+            '            List<MovieSort.SortData> tyHead = new ArrayList<>();\n'
+            '            for (int tyK = 0; tyK < tyCat.length; tyK++) {\n'
+            '                for (int tyJ = 0; tyJ < tyRest.size(); tyJ++) {\n'
+            '                    MovieSort.SortData tyD = tyRest.get(tyJ);\n'
+            '                    if (tyD != null && tyD.name != null && tyHead.size() < 12 && tyD.name.startsWith(tyCat[tyK])) tyHead.add(tyD);\n'
+            '                }\n'
+            '            }\n'
+            '            List<MovieSort.SortData> tyOut = new ArrayList<>();\n'
+            '            tyOut.add(newSortData.get(0));\n'
+            '            tyOut.addAll(tyHead);\n'
+            '            for (int tyJ = 0; tyJ < tyRest.size() && tyOut.size() < 13; tyJ++) {\n'
+            '                MovieSort.SortData tyD = tyRest.get(tyJ);\n'
+            '                if (!tyHead.contains(tyD)) tyOut.add(tyD);\n'
+            '            }\n'
+            '            newSortData = tyOut;\n'
             '        }',
             required=False,
             expect=1,
@@ -559,6 +576,38 @@ try:
         skipped.append("缺少 tools/site-health/HomeHotDouban.java")
 except Exception as _e:
     skipped.append("首页双列表处理失败：%s" % _e)
+
+# ----------------------------------------------------------------------------
+# 4.11 体验细节（2026-11-06 实机测试后）
+# ----------------------------------------------------------------------------
+
+# C. 热播卡片：评分为 0 时不要显示「0」
+try:
+    _hv = Doc("app/src/main/java/com/github/tvbox/osc/ui/adapter/HomeHotVodAdapter.java")
+    _hv.replace(
+        "评分为0不显示",
+        'if (item.note == null || item.note.isEmpty()) {',
+        'if (item.note == null || item.note.isEmpty() || "0".equals(item.note.trim()) || "0.0".equals(item.note.trim())) {',
+        required=False,
+        expect=1,
+    )
+    _hv.save()
+except SystemExit:
+    skipped.append("HomeHotVodAdapter 不存在，跳过评分处理")
+
+# D. 详情页：隐藏无意义的「播放地址」长直链
+try:
+    _dl = Doc("app/src/main/res/layout/activity_detail.xml")
+    _dl.replace(
+        "隐藏播放地址",
+        'android:id="@+id/tvPlayUrl"\n                    android:layout_width="match_parent"',
+        'android:id="@+id/tvPlayUrl"\n                    android:visibility="gone"\n                    android:layout_width="match_parent"',
+        required=False,
+        expect=1,
+    )
+    _dl.save()
+except SystemExit:
+    skipped.append("activity_detail.xml 不存在，跳过播放地址隐藏")
 
 # ----------------------------------------------------------------------------
 # 5. 工程配置
