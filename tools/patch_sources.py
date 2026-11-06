@@ -610,6 +610,30 @@ except SystemExit:
     skipped.append("activity_detail.xml 不存在，跳过播放地址隐藏")
 
 # ----------------------------------------------------------------------------
+# 4.12 直播播放器固定 EXO（不受远端配置缓存影响）
+# ----------------------------------------------------------------------------
+# 原来 ApiConfig 会用远端 config 的 lives[].playerType 覆盖 LIVE_PLAY_TYPE，
+# 而配置走 CF 代理有缓存，导致"改配置改不动播放器"。这里直接固定。
+try:
+    _ac = Doc("app/src/main/java/com/github/tvbox/osc/api/ApiConfig.java")
+    _ac.replace(
+        "直播播放器固定",
+        '            if(livesOBJ.has("playerType")){\n'
+        '                String livePlayType =livesOBJ.get("playerType").getAsString();\n'
+        '                Hawk.put(HawkConfig.LIVE_PLAY_TYPE,livePlayType);\n'
+        '            }else {\n'
+        '                Hawk.put(HawkConfig.LIVE_PLAY_TYPE,Hawk.get(HawkConfig.PLAY_TYPE, 2));\n'
+        '            }',
+        '            // [观影听涛] 直播播放器固定 EXO：IJK 硬解遇到不支持的 profile 会干等 10s 才切换\n'
+        '            Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 2);',
+        required=False,
+        expect=1,
+    )
+    _ac.save()
+except SystemExit:
+    skipped.append("ApiConfig.java 不存在，跳过直播播放器固定")
+
+# ----------------------------------------------------------------------------
 # 5. 工程配置
 # ----------------------------------------------------------------------------
 root_gradle = ROOT / "build.gradle"
