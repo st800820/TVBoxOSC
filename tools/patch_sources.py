@@ -191,7 +191,7 @@ a.replace(
     "Hawk.init(this).build();\n"
     '        // [观影听涛] 内置源：首次写入；若仍是旧内置源（gao/ghproxy），升级时自动迁移到自托管配置\n'
     '        String tyApi = Hawk.get(HawkConfig.API_URL, "");\n'
-    '        if (tyApi.isEmpty() || tyApi.contains("gaotianliuyun/gao") || tyApi.contains("ghproxy.net")) {\n'
+    '        if (tyApi.isEmpty() || tyApi.contains("gaotianliuyun/gao") || tyApi.contains("ghproxy.net") || tyApi.contains("gh.74259136.xyz")) {\n'
     f'            Hawk.put(HawkConfig.API_URL, "{API_URL}");\n'
     '        }\n'
     '        // [观影听涛] 锁定最优设置：每次启动强制写入，避免误调导致变慢\n'
