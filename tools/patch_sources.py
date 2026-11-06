@@ -805,6 +805,31 @@ except SystemExit:
 # 结论：问题在播放器兼容性，不在超时阈值。解法是 4.14 的 host 记忆（切过就记住）。
 
 # ----------------------------------------------------------------------------
+# 4.16 一个台只允许换一次播放器（2026-11-06 v6/v7/v8 实测后）
+# ----------------------------------------------------------------------------
+# playStateChanged 的 PREPARED/BUFFERED/PLAYING 分支会把 allowLiveSwitchPlayer 置回 true，
+# 于是「EXO 失败→切 IJK→IJK 失败→切回 EXO→…」会一直乒乓下去，每个来回多付 4 秒，
+# 而且 host 记忆被两边轮流覆盖（v8 实测 52 次写入，同一 host 在 1/2 之间反复翻）。
+# 改成只在 playChannel 里复位：一个台中途最多换一次播放器，换了还不行就换源。
+try:
+    _lp4 = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
+    _lp4.replace(
+        "播放器不再无限轮换",
+        '                        currentLiveChangeSourceTimes = 0;\n'
+        '                        allowLiveSwitchPlayer = true;\n'
+        '                        break;',
+        '                        currentLiveChangeSourceTimes = 0;\n'
+        '                        // [观影听涛] 不在这里重置 allowLiveSwitchPlayer：\n'
+        '                        // 一个台最多换一次播放器，换了还不行就换源，避免 EXO/IJK 乒乓\n'
+        '                        break;',
+        required=False,
+        expect=1,
+    )
+    _lp4.save()
+except SystemExit:
+    skipped.append("LivePlayActivity 不存在，跳过播放器轮换限制")
+
+# ----------------------------------------------------------------------------
 # 5. 工程配置
 # ----------------------------------------------------------------------------
 root_gradle = ROOT / "build.gradle"
