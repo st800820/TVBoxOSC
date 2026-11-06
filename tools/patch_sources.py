@@ -634,6 +634,24 @@ except SystemExit:
     skipped.append("ApiConfig.java 不存在，跳过直播播放器固定")
 
 # ----------------------------------------------------------------------------
+# 4.13 直播换源/换播放器超时 10s -> 4s
+# ----------------------------------------------------------------------------
+# 原逻辑 (LIVE_CONNECT_TIMEOUT 默认 1 + 1) * 5000 = 10 秒才切下一条线路/播放器。
+# 实测切台中位 15.3 秒，其中 10 秒都花在等这个超时。压到 4 秒。
+try:
+    _lp = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
+    _lp.replace(
+        "换源超时改 4 秒",
+        '(Hawk.get(HawkConfig.LIVE_CONNECT_TIMEOUT, 1) + 1) * 5000L',
+        '(Hawk.get(HawkConfig.LIVE_CONNECT_TIMEOUT, 0) + 1) * 4000L',
+        required=False,
+        expect=1,
+    )
+    _lp.save()
+except SystemExit:
+    skipped.append("LivePlayActivity 不存在，跳过超时调整")
+
+# ----------------------------------------------------------------------------
 # 5. 工程配置
 # ----------------------------------------------------------------------------
 root_gradle = ROOT / "build.gradle"

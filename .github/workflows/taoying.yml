@@ -14,7 +14,7 @@ on:
       api_url:
         description: '内置订阅源URL（App内仍可随时更换；留空则用默认高天流云源）'
         required: false
-        default: 'https://gh.74259136.xyz/https://raw.githubusercontent.com/st800820/TVBoxOSC/master/taoying/config.json'
+        default: 'https://gh-proxy.com/https://raw.githubusercontent.com/st800820/TVBoxOSC/master/taoying/config.json'
       publish:
         description: '构建完成后发布到 Releases（取消勾选则仅产出 Artifact）'
         required: false
@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 60
     env:
       APP_NAME: ${{ inputs.app_name || '观影听涛' }}
-      API_URL: ${{ inputs.api_url || 'https://gh.74259136.xyz/https://raw.githubusercontent.com/st800820/TVBoxOSC/master/taoying/config.json' }}
+      API_URL: ${{ inputs.api_url || 'https://gh-proxy.com/https://raw.githubusercontent.com/st800820/TVBoxOSC/master/taoying/config.json' }}
       APP_ID: com.taoying.app
       ENABLE_DESUGAR: 'false'
     steps:
