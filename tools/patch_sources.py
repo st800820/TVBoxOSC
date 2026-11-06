@@ -212,7 +212,12 @@ a.replace(
     '        if (tyHome.isEmpty() || "豆豆".equals(tyHome)) { Hawk.put(HawkConfig.HOME_API, "暴風"); }\n'
     '        // [观影听涛] 片源广告过滤默认开启：拦截 m3u8 里插播的广告分片（棋牌/博彩类常见）\n'
     '        // 只在没设过时写 true，用户仍可在 设置→播放器 里手动关闭（个别片源过滤后起播失败时用）\n'
-    '        if (!Hawk.contains(HawkConfig.M3U8_PURIFY)) { Hawk.put(HawkConfig.M3U8_PURIFY, true); }',
+    '        if (!Hawk.contains(HawkConfig.M3U8_PURIFY)) { Hawk.put(HawkConfig.M3U8_PURIFY, true); }\n'
+    '        // [观影听涛] 直播画面比例默认「裁剪」：不少源是 720x576/640x480 的 4:3 标清，\n'
+    '        // 「默认」比例会左右留 31% 黑边（实机截图确认）。裁剪可铺满且不变形；\n'
+    '        // 16:9 的源比例相同，裁剪结果与默认完全一致，不受影响。\n'
+    '        // 想改回来：直播界面 → 长按 OK → 画面比例 → 默认\n'
+    '        if (!Hawk.contains(HawkConfig.LIVE_PLAY_SCALE)) { Hawk.put(HawkConfig.LIVE_PLAY_SCALE, 5); }',
     expect=1,
 )
 
