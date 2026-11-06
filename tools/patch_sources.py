@@ -777,19 +777,19 @@ try:
         required=False,
         expect=1,
     )
-    # 画面出来 = 这路真的能播，此时才写记忆（写早了会把失败的类型记进去）
+    # 切换播放器 = 上一个类型在这个 host 上起不来，此时才写记忆。
+    # 不要在 playStateChanged 里写：EXO 常常短暂进一下 BUFFERED 就卡住，会把记错的值写进去，
+    # 导致同一个 host 的记忆在 1/2 之间来回翻（v6 实测 125.93.74.27 就翻了 5 次）。
     _lp2.replace(
-        "起播成功写 host 记忆",
-        '                        currentLiveChangeSourceTimes = 0;\n'
-        '                        allowLiveSwitchPlayer = true;\n'
-        '                        break;',
-        '                        currentLiveChangeSourceTimes = 0;\n'
-        '                        allowLiveSwitchPlayer = true;\n'
-        '                        // [观影听涛] 已出画面，记住这个 host 用哪个播放器\n'
-        '                        if (currentLiveChannelItem != null) {\n'
-        '                            livePlayerManager.rememberHostPlayer(currentLiveChannelItem.getUrl());\n'
-        '                        }\n'
-        '                        break;',
+        "切播放器时写 host 记忆",
+        '        allowLiveSwitchPlayer = false;\n'
+        '        String retryUrl = isSHIYI && !TextUtils.isEmpty(playUrl) ? playUrl : currentLiveChannelItem.getUrl();\n'
+        '        mVideoView.setUrl(retryUrl, liveChannelHeader());',
+        '        allowLiveSwitchPlayer = false;\n'
+        '        String retryUrl = isSHIYI && !TextUtils.isEmpty(playUrl) ? playUrl : currentLiveChannelItem.getUrl();\n'
+        '        // [观影听涛] 换播放器了说明上一个在这个 host 起不来，把换后的记下来\n'
+        '        livePlayerManager.rememberHostPlayer(retryUrl);\n'
+        '        mVideoView.setUrl(retryUrl, liveChannelHeader());',
         required=False,
         expect=1,
     )
@@ -798,60 +798,11 @@ except SystemExit:
     skipped.append("LivePlayActivity 不存在，跳过 host 记忆应用")
 
 # ----------------------------------------------------------------------------
-# 4.15 有缓冲就不急着切台（2026-11-06 v6 实测后）
+# 4.15 （已证伪，不做）「有缓冲就不急着切台」
 # ----------------------------------------------------------------------------
-# v6 实测：44 次切台里 20 次（45%）在 4 秒超时后重试，但重试的多是「只是慢」的源，
-# 不是死源。改成：超时那一刻若已经缓冲到数据，说明流是活的，再宽限 2.5 秒；
-# 整个切台周期只宽限一次，真挂死的源仍然是 4s + 2.5s 上限。
-try:
-    _lp3 = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
-    _lp3.replace(
-        "宽限计数成员",
-        '    private boolean allowLiveSwitchPlayer = true;\n',
-        '    private boolean allowLiveSwitchPlayer = true;\n'
-        '    // [观影听涛] 超时宽限已用次数：每个切台周期最多宽限一次\n'
-        '    private int liveGraceUsed = 0;\n',
-        required=False,
-        expect=1,
-    )
-    _lp3.replace(
-        "有缓冲就宽限",
-        '    private Runnable mConnectTimeoutChangeSourceRun = new Runnable() {\n'
-        '        @Override\n'
-        '        public void run() {\n'
-        '            if (switchLivePlayerAndReplay()) {\n'
-        '                return;\n'
-        '            }',
-        '    private Runnable mConnectTimeoutChangeSourceRun = new Runnable() {\n'
-        '        @Override\n'
-        '        public void run() {\n'
-        '            // [观影听涛] 已经缓冲到数据说明这路是活的、只是慢：再给 2.5 秒\n'
-        '            if (liveGraceUsed < 1 && mVideoView != null\n'
-        '                    && (mVideoView.getBufferedPercentage() > 0 || mVideoView.getCurrentPosition() > 0)) {\n'
-        '                liveGraceUsed = 1;\n'
-        '                LOG.i("echo-liveGrace wait 2500ms before switching");\n'
-        '                mHandler.postDelayed(this, 2500);\n'
-        '                return;\n'
-        '            }\n'
-        '            if (switchLivePlayerAndReplay()) {\n'
-        '                return;\n'
-        '            }',
-        required=False,
-        expect=1,
-    )
-    _lp3.replace(
-        "宽限计数复位",
-        '        int previousLivePlayerType = livePlayerManager.getLivePlayerType();\n'
-        '        allowLiveSwitchPlayer = true;\n',
-        '        int previousLivePlayerType = livePlayerManager.getLivePlayerType();\n'
-        '        allowLiveSwitchPlayer = true;\n'
-        '        liveGraceUsed = 0;\n',
-        required=False,
-        expect=1,
-    )
-    _lp3.save()
-except SystemExit:
-    skipped.append("LivePlayActivity 不存在，跳过超时宽限")
+# v7 试过：超时那一刻若 bufferedPercentage>0 就再宽限 2.5 秒。实测 29 次触发、
+# 其中绝大多数宽限后照样得切 —— 这些源是 EXO 根本解不了（不是慢），缓冲一点就卡住。
+# 结论：问题在播放器兼容性，不在超时阈值。解法是 4.14 的 host 记忆（切过就记住）。
 
 # ----------------------------------------------------------------------------
 # 5. 工程配置
