@@ -44,7 +44,11 @@ done, skipped, failed = [], [], []
 
 
 class Doc:
-    """把文件内容读进内存，多次替换后一次性落盘，避免 sed 逐行改的漏改/重改。"""
+    """把文件内容读进内存，多次替换后一次性落盘，避免 sed 逐行改的漏改/重改。
+
+    上游源码是 CRLF（Windows 换行），脚本里的多行匹配串写的是 \\n。
+    读入时统一成 \\n 再匹配，落盘时还原，否则所有多行补丁都会静默匹配失败。
+    """
 
     def __init__(self, rel):
         self.rel = rel
@@ -53,6 +57,9 @@ class Doc:
             raise SystemExit(f"[FATAL] 找不到文件: {rel}")
         with open(self.path, "r", encoding="utf-8", newline="") as f:
             self.text = f.read()
+        self.crlf = "\r\n" in self.text
+        if self.crlf:
+            self.text = self.text.replace("\r\n", "\n")
 
     def replace(self, tag, old, new, required=True, expect=1):
         """expect=None 表示只替换第一处、不校验总数。"""
@@ -69,8 +76,9 @@ class Doc:
         return True
 
     def save(self):
+        out = self.text.replace("\n", "\r\n") if self.crlf else self.text
         with open(self.path, "w", encoding="utf-8", newline="") as f:
-            f.write(self.text)
+            f.write(out)
 
 
 print(f"== 涛影定制开始：APP_NAME={APP_NAME} APP_ID={APP_ID} VERSION={VERSION_CODE}")
@@ -204,10 +212,7 @@ a.replace(
     '        if (tyHome.isEmpty() || "豆豆".equals(tyHome)) { Hawk.put(HawkConfig.HOME_API, "暴風"); }\n'
     '        // [观影听涛] 片源广告过滤默认开启：拦截 m3u8 里插播的广告分片（棋牌/博彩类常见）\n'
     '        // 只在没设过时写 true，用户仍可在 设置→播放器 里手动关闭（个别片源过滤后起播失败时用）\n'
-    '        if (!Hawk.contains(HawkConfig.M3U8_PURIFY)) { Hawk.put(HawkConfig.M3U8_PURIFY, true); }\n'
-    '        // [观影听涛] 直播默认 IJK 硬解：EXO 在 4.4 老盒子上播 HLS 常黑屏（点播仍用 EXO，不动）\n'
-    '        if (!Hawk.contains(HawkConfig.LIVE_PLAY_TYPE)) { Hawk.put(HawkConfig.LIVE_PLAY_TYPE, 1); }\n'
-    '        if (!Hawk.contains(HawkConfig.IJK_CODEC)) { Hawk.put(HawkConfig.IJK_CODEC, "\u786c\u89e3\u7801"); }',
+    '        if (!Hawk.contains(HawkConfig.M3U8_PURIFY)) { Hawk.put(HawkConfig.M3U8_PURIFY, true); }',
     expect=1,
 )
 
@@ -666,6 +671,131 @@ try:
     _lp.save()
 except SystemExit:
     skipped.append("LivePlayActivity 不存在，跳过超时调整")
+
+# ----------------------------------------------------------------------------
+# 4.14 按 host 记忆直播播放器（2026-11-06 第二轮复测后）
+# ----------------------------------------------------------------------------
+# 复测日志：88 次播放器切换 / 83 次起流 —— 几乎每次起播都要「先试 EXO，4 秒起不来
+# 再切 IJK」。同一源站 host 对 EXO/IJK 的兼容性基本固定，记住上次真正播出画面的
+# 那个类型，下次直接用，省掉这 4 秒。
+try:
+    _lpm = Doc("app/src/main/java/com/github/tvbox/osc/bean/LivePlayerManager.java")
+    _lpm.replace(
+        "host 记忆播放器",
+        '    public void changeLivePlayerScale(@NonNull VideoView videoView, int playerScale){',
+        '    // [观影听涛] 按 host 记住上次能起播的播放器类型（1=IJK 2=EXO），最多记 50 个 host\n'
+        '    private static final String HOST_MEM_PREFIX = "live_pl_";\n'
+        '    private static final String HOST_MEM_INDEX = "live_pl_index";\n'
+        '    private static final int HOST_MEM_MAX = 50;\n'
+        '\n'
+        '    private static String hostOf(String url) {\n'
+        '        if (url == null || url.isEmpty()) return "";\n'
+        '        try {\n'
+        '            String h = android.net.Uri.parse(url).getHost();\n'
+        '            if (h == null || h.isEmpty()) return "";\n'
+        '            return h.toLowerCase();\n'
+        '        } catch (Throwable t) {\n'
+        '            return "";\n'
+        '        }\n'
+        '    }\n'
+        '\n'
+        '    /** 起播前调用：这个 host 记住过播放器就直接用，不再试错 */\n'
+        '    public void applyHostPlayerMemory(VideoView videoView, String url) {\n'
+        '        if (videoView == null || currentPlayerConfig == null) return;\n'
+        '        String host = hostOf(url);\n'
+        '        if (host.isEmpty()) return;\n'
+        '        int pl = Hawk.get(HOST_MEM_PREFIX + host, 0);\n'
+        '        if (pl != 1 && pl != 2) return;\n'
+        '        if (currentPlayerConfig.optInt("pl", 2) == pl) return;\n'
+        '        try {\n'
+        '            currentPlayerConfig.put("pl", pl);\n'
+        '            defaultPlayerConfig.put("pl", pl);\n'
+        '        } catch (JSONException e) {\n'
+        '            return;\n'
+        '        }\n'
+        '        PlayerHelper.updateCfg(videoView, currentPlayerConfig);\n'
+        '        LOG.i("echo-livePlayerMemory use pl=" + pl + " for " + host);\n'
+        '    }\n'
+        '\n'
+        '    /** 画面真的出来之后调用：把当前播放器记到这个 host 名下 */\n'
+        '    public void rememberHostPlayer(String url) {\n'
+        '        if (currentPlayerConfig == null) return;\n'
+        '        String host = hostOf(url);\n'
+        '        if (host.isEmpty()) return;\n'
+        '        int pl;\n'
+        '        try {\n'
+        '            pl = currentPlayerConfig.getInt("pl");\n'
+        '        } catch (JSONException e) {\n'
+        '            return;\n'
+        '        }\n'
+        '        if (pl != 1 && pl != 2) return;\n'
+        '        if (Hawk.get(HOST_MEM_PREFIX + host, 0) == pl) return;\n'
+        '        Hawk.put(HOST_MEM_PREFIX + host, pl);\n'
+        '        String idx = Hawk.get(HOST_MEM_INDEX, "");\n'
+        '        java.util.ArrayList<String> hosts = new java.util.ArrayList<String>();\n'
+        '        for (String h : idx.split(",")) {\n'
+        '            if (!h.isEmpty() && !h.equals(host)) hosts.add(h);\n'
+        '        }\n'
+        '        hosts.add(host);\n'
+        '        // 超上限只从索引里丢掉最老的，残留的 Hawk 键不影响功能\n'
+        '        while (hosts.size() > HOST_MEM_MAX) hosts.remove(0);\n'
+        '        Hawk.put(HOST_MEM_INDEX, android.text.TextUtils.join(",", hosts));\n'
+        '        LOG.i("echo-livePlayerMemory remember pl=" + pl + " for " + host);\n'
+        '    }\n'
+        '\n'
+        '    public void changeLivePlayerScale(@NonNull VideoView videoView, int playerScale){',
+        required=False,
+        expect=1,
+    )
+    _lpm.save()
+except SystemExit:
+    skipped.append("LivePlayerManager 不存在，跳过 host 记忆播放器")
+
+# 起播前应用记忆（必须在 canReusePlayer 之前，改了播放器类型就不能复用播放器）
+try:
+    _lp2 = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
+    _lp2.replace(
+        "起播前用 host 记忆",
+        '            boolean reusePlayer = canReusePlayer(previousLivePlayerType);\n'
+        '            boolean keepExoFrame = reusePlayer && previousLivePlayerType == 2;\n'
+        '            if (showPreviousFrame && !keepExoFrame) {\n'
+        '                showSwitchChannelSnapshot();\n'
+        '            } else {\n'
+        '                hideSwitchChannelSnapshot();\n'
+        '            }\n'
+        '            String liveUrl = currentLiveChannelItem.getUrl();\n',
+        '            String liveUrl = currentLiveChannelItem.getUrl();\n'
+        '            // [观影听涛] 这个 host 上次用哪个播放器能起，就直接用它起播\n'
+        '            livePlayerManager.applyHostPlayerMemory(mVideoView, liveUrl);\n'
+        '            boolean reusePlayer = canReusePlayer(previousLivePlayerType);\n'
+        '            boolean keepExoFrame = reusePlayer && previousLivePlayerType == 2;\n'
+        '            if (showPreviousFrame && !keepExoFrame) {\n'
+        '                showSwitchChannelSnapshot();\n'
+        '            } else {\n'
+        '                hideSwitchChannelSnapshot();\n'
+        '            }\n',
+        required=False,
+        expect=1,
+    )
+    # 画面出来 = 这路真的能播，此时才写记忆（写早了会把失败的类型记进去）
+    _lp2.replace(
+        "起播成功写 host 记忆",
+        '                        currentLiveChangeSourceTimes = 0;\n'
+        '                        allowLiveSwitchPlayer = true;\n'
+        '                        break;',
+        '                        currentLiveChangeSourceTimes = 0;\n'
+        '                        allowLiveSwitchPlayer = true;\n'
+        '                        // [观影听涛] 已出画面，记住这个 host 用哪个播放器\n'
+        '                        if (currentLiveChannelItem != null) {\n'
+        '                            livePlayerManager.rememberHostPlayer(currentLiveChannelItem.getUrl());\n'
+        '                        }\n'
+        '                        break;',
+        required=False,
+        expect=1,
+    )
+    _lp2.save()
+except SystemExit:
+    skipped.append("LivePlayActivity 不存在，跳过 host 记忆应用")
 
 # ----------------------------------------------------------------------------
 # 5. 工程配置
