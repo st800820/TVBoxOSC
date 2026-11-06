@@ -609,6 +609,22 @@ try:
 except SystemExit:
     skipped.append("activity_detail.xml 不存在，跳过播放地址隐藏")
 
+# D2. setTextShow 会把 view 设为 VISIBLE，光改布局没用，这里在方法入口拦掉
+try:
+    _dt = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/DetailActivity.java")
+    _dt.replace(
+        "隐藏播放地址(代码)",
+        '    private void setTextShow(TextView view, String tag, String info) {\n',
+        '    private void setTextShow(TextView view, String tag, String info) {\n'
+        '        // [观影听涛] 详情页不展示播放直链（对用户无意义，还暴露源站）\n'
+        '        if (view != null && view.getId() == R.id.tvPlayUrl) { view.setVisibility(View.GONE); return; }\n',
+        required=False,
+        expect=1,
+    )
+    _dt.save()
+except SystemExit:
+    skipped.append("DetailActivity 不存在，跳过播放地址隐藏（代码）")
+
 # ----------------------------------------------------------------------------
 # 4.12 直播播放器固定 EXO（不受远端配置缓存影响）
 # ----------------------------------------------------------------------------
