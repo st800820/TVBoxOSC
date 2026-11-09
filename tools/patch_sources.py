@@ -835,6 +835,53 @@ except SystemExit:
     skipped.append("LivePlayActivity 不存在，跳过播放器轮换限制")
 
 # ----------------------------------------------------------------------------
+# 4.17 手机遥控台（借鉴影视仓的「手机配置 / 电视播放」双端分工）
+# ----------------------------------------------------------------------------
+# 上游自带的 Web 页（res/raw/index.html）只能推片和填接口，看不到电视当前状态。
+# 这里换成手机友好的单页：状态面板 + 改源 + 切画面比例 + 重启生效。
+# 后端只加两个只读/白名单接口，其余复用原有的 /action。
+print("== 手机遥控台 ==")
+_webdir = pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")) / "tools/taoying-web"
+if (_webdir / "TaoyingStatus.java").exists():
+    _dst = ROOT / "app/src/main/java/com/github/tvbox/osc/util/TaoyingStatus.java"
+    _dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(_webdir / "TaoyingStatus.java", _dst)
+    done.append("注入 TaoyingStatus")
+else:
+    skipped.append("缺少 tools/taoying-web/TaoyingStatus.java")
+
+try:
+    _webdir / "index.html"
+    if (_webdir / "index.html").exists():
+        shutil.copyfile(_webdir / "index.html", ROOT / "app/src/main/res/raw/index.html")
+        done.append("替换手机遥控台页面")
+    _rs = Doc("app/src/main/java/com/github/tvbox/osc/server/RemoteServer.java")
+    _rs.replace(
+        "遥控台接口",
+        '                } else if (fileName.equals("/action")) {',
+        '                } else if (fileName.equals("/api/status")) {\n'
+        '                    // [观影听涛] 手机遥控台：手机打开 http://盒子IP:9978/ 就能看到电视当前配置\n'
+        '                    return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "application/json; charset=utf-8",\n'
+        '                            com.github.tvbox.osc.util.TaoyingStatus.json(com.github.tvbox.osc.base.App.getInstance()));\n'
+        '                } else if (fileName.equals("/api/set")) {\n'
+        '                    com.github.tvbox.osc.base.App tyApp = com.github.tvbox.osc.base.App.getInstance();\n'
+        '                    String tyK = session.getParms().get("k");\n'
+        '                    String tyV = session.getParms().get("v");\n'
+        '                    if ("reboot".equals(tyK)) {\n'
+        '                        com.github.tvbox.osc.util.TaoyingStatus.reboot(tyApp);\n'
+        '                        return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "text/plain; charset=utf-8", "restarting");\n'
+        '                    }\n'
+        '                    boolean tyOk = com.github.tvbox.osc.util.TaoyingStatus.set(tyK, tyV);\n'
+        '                    return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "text/plain; charset=utf-8", tyOk ? "ok" : "reject");\n'
+        '                } else if (fileName.equals("/action")) {',
+        required=False,
+        expect=1,
+    )
+    _rs.save()
+except SystemExit:
+    skipped.append("RemoteServer 不存在，跳过遥控台接口")
+
+# ----------------------------------------------------------------------------
 # 5. 工程配置
 # ----------------------------------------------------------------------------
 root_gradle = ROOT / "build.gradle"
