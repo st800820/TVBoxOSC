@@ -967,6 +967,86 @@ if py_gradle.exists():
             f.writelines(lines)
         done.append(f"移除 pyramid 硬编码 python 路径（{removed} 行）")
 
+# ----------------------------------------------------------------------------
+# 4.18 明确播放错误 → 立即换源（2026-11-12 下午 A/B 驱动）
+# ----------------------------------------------------------------------------
+# 上游 initVideoView().playStateChanged 里：
+#   STATE_ERROR / STATE_PLAYBACK_COMPLETED → postDelayed(..., 3500)  ← 已确定失败还白等 3.5 秒
+#   mConnectTimeoutChangeSourceRun.run()   → 先 switchLivePlayerAndReplay() ← 又白等一轮 4 秒
+# 上午 T2 证伪的是「压短兜底超时」（1.5s 误杀慢源），不是「错误即切」。
+# 本补丁只改「结果已确定」这条路径：200ms 防抖后立即换源，且跳过播放器试错；
+# 「还在 BUFFERING/PREPARING、结果未定」的慢源仍走已验证的 4 秒兜底，绝不缩短。
+try:
+    _err = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
+
+    # 1) 状态标志：区分「超时兜底」与「明确错误」
+    _err.replace(
+        "错误即换源标志",
+        '    private boolean allowLiveSwitchPlayer = true;\n',
+        '    private boolean allowLiveSwitchPlayer = true;\n'
+        '    // [观影听涛] true = 本次换源由明确播放错误触发，不再先试换播放器\n'
+        '    private boolean immediateErrorChangeSource = false;\n',
+        required=False, expect=1,
+    )
+
+    # 2) 每次状态回调先复位，避免 error 后被 BUFFERING 取消任务时标志残留
+    _err.replace(
+        "状态回调复位标志",
+        '            public void playStateChanged(int playState) {\n'
+        '                mHandler.removeCallbacks(mConnectTimeoutChangeSourceRun);\n'
+        '                switch (playState) {\n',
+        '            public void playStateChanged(int playState) {\n'
+        '                mHandler.removeCallbacks(mConnectTimeoutChangeSourceRun);\n'
+        '                immediateErrorChangeSource = false;\n'
+        '                switch (playState) {\n',
+        required=False, expect=1,
+    )
+
+    # 3) 明确错误：3.5 秒 → 200ms，并置标志
+    _err.replace(
+        "错误立即换源",
+        '                    case VideoView.STATE_ERROR:\n'
+        '                    case VideoView.STATE_PLAYBACK_COMPLETED:\n'
+        '                        // 错误或播放结束状态：播放器遇到错误或播放完毕时，\n'
+        '                        // 启动自动换源任务，等待3秒后尝试切换至备选源\n'
+        '                        hideSwitchChannelSnapshot();\n'
+        '                        mHandler.postDelayed(mConnectTimeoutChangeSourceRun, 3500);\n'
+        '                        break;\n',
+        '                    case VideoView.STATE_ERROR:\n'
+        '                    case VideoView.STATE_PLAYBACK_COMPLETED:\n'
+        '                        hideSwitchChannelSnapshot();\n'
+        '                        // [观影听涛] 错误已是确定事件，不再白等 3.5 秒；200ms 防抖后立即换源\n'
+        '                        immediateErrorChangeSource = true;\n'
+        '                        mHandler.postDelayed(mConnectTimeoutChangeSourceRun, 200);\n'
+        '                        break;\n',
+        required=False, expect=1,
+    )
+
+    # 4) 任务执行：明确错误时跳过 switchLivePlayerAndReplay（省掉一次 4 秒播放器试错）
+    _err.replace(
+        "错误路径跳过播放器试错",
+        '        public void run() {\n'
+        '            if (switchLivePlayerAndReplay()) {\n'
+        '                return;\n'
+        '            }\n'
+        '            currentLiveChangeSourceTimes++;\n',
+        '        public void run() {\n'
+        '            // [观影听涛] 明确错误直接换线路，不再先换播放器白等一轮\n'
+        '            boolean immediate = immediateErrorChangeSource;\n'
+        '            immediateErrorChangeSource = false;\n'
+        '            if (immediate) {\n'
+        '                LOG.i("echo-errorChangeSource immediate, skip player retry");\n'
+        '            } else if (switchLivePlayerAndReplay()) {\n'
+        '                return;\n'
+        '            }\n'
+        '            currentLiveChangeSourceTimes++;\n',
+        required=False, expect=1,
+    )
+    _err.save()
+    done.append("4.18 明确播放错误 3.5s→200ms 立即换源 + 跳过播放器试错（4s 兜底不变）")
+except SystemExit:
+    skipped.append("LivePlayActivity 不存在，跳过错误即换源")
+
 # local.properties 清空，避免继承本机 SDK 路径
 with open(ROOT / "local.properties", "w", encoding="utf-8", newline="") as f:
     f.write("")
@@ -980,6 +1060,11 @@ checks = [
     ("versionName", "app/build.gradle", f"1.0.0-taoying-{BUILD_DATE}"),
     ("versionCode", "app/build.gradle", f"versionCode {VERSION_CODE}"),
     ("内置源", "app/src/main/java/com/github/tvbox/osc/base/App.java", "HawkConfig.API_URL"),
+    # 4.18 是本版唯一被测变量，必须回读确认打上了，否则构建出的包其实没变化
+    ("错误即换源-标志", "app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java",
+     "immediateErrorChangeSource"),
+    ("错误即换源-跳过播放器", "app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java",
+     "echo-errorChangeSource immediate"),
 ]
 for name, rel, needle in checks:
     text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")

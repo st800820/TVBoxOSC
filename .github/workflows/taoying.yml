@@ -55,8 +55,18 @@ jobs:
       - name: Clone upstream source
         run: |
           set -e
-          git clone --depth 1 https://github.com/q215613905/TVBoxOS TVBoxOSC
+          # 锁定上游 commit：A/B 对比必须排除「上游自己变了」这个混淆变量。
+          # 2026-11-12 上午 T0 用 ab11d28、v2 用 89ec1b7，导致无法判断差异来自
+          # 我方改动还是上游。此后所有构建固定到同一个 SHA，要升级上游需显式改这里。
+          UPSTREAM_PIN=89ec1b7504426b3ff5e9d0996c3bbf50c9d2eff0
+          git init -q TVBoxOSC
+          git -C TVBoxOSC remote add origin https://github.com/q215613905/TVBoxOS
+          git -C TVBoxOSC fetch --depth 1 origin "$UPSTREAM_PIN"
+          git -C TVBoxOSC checkout --detach FETCH_HEAD
+          ACTUAL=$(git -C TVBoxOSC rev-parse HEAD)
+          [ "$ACTUAL" = "$UPSTREAM_PIN" ] || { echo "::error::上游 SHA 锁定失败: $ACTUAL"; exit 1; }
           UPSTREAM=$(git -C TVBoxOSC rev-parse --short HEAD)
+          echo "上游锁定: $UPSTREAM_PIN (不再随上游 main 漂移)"
           DAY=$(TZ=Asia/Shanghai date +%y%m%d)
           EXIST=$(git ls-remote --tags origin 2>/dev/null | sed 's#.*refs/tags/##' | grep -c "^taoying-${DAY}v" || true)
           SEQ=$((EXIST + 1))
@@ -221,13 +231,11 @@ jobs:
             - `*_arm32.apk`：仅 armeabi-v7a，**安卓 4.4 老机顶盒优先装这个**
             - `*_universal.apk`：arm64 + armv7 双份 so，需要兼容多种设备时才用
 
-            ### 本版改动（2026-11-12 云主机 A/B 实测驱动 · v2 回退版）
-            - **回退「超时 4s→1.5s」**：v1 实测证伪。1.5s 下 12 次切台发生 31 次播放器切换（基线 8 次）、6s 出画面率 58.3%→16.7%、PSS +40%。原因是「起流→解码器」P90 2.545s，缩短超时误杀慢源。保持已验证的 4s
-            - **IJK 参数补齐（保留）**：`min-frames=5` / `flush_packets=1` / `seek-at-start=0` / `sw-fallback=1`，缩短首帧延迟、硬解失败自动回退软解
-            - **新增 4MB probesize 对照**：`硬解码·稳定4M` 组，对齐盒端实测 `IJK_probesize=4096000`，1MB 激进组保留可回退
-            - **启用 shrinkResources**：剔除未引用资源，压 APK 体积
-            - **新增 arm64-only 构建产物**：单架构包，服务「轻小」目标
-            - 保留既有：EPG 异步初始化、host 播放器记忆、一个台最多换一次播放器、手机遥控台、站点自检
+            ### 本版改动（2026-11-12 下午 · 事件驱动换源 v3）
+            - **新增「明确报错立即换源」**：上游在 `STATE_ERROR` / `STATE_PLAYBACK_COMPLETED` 已确定失败后仍要等 3.5 秒才动作。现改为 200ms 防抖后立刻换下一条线路，并**跳过「先换播放器」**的试错（此前每次失败先白等一轮 4 秒）
+            - **4 秒兜底超时保持不变**：仅用于「还在缓冲、结果未定」的慢源。上午已实测证伪「把超时压到 1.5s」——那会误杀慢但能播的源，本版不重蹈覆辙
+            - **锁定上游 SHA `89ec1b7`**：构建不再随上游 main 漂移，消除上午 A/B 中 `ab11d28`→`89ec1b7` 的混淆变量
+            - 保留既有：IJK 秒开参数组、4MB probesize 对照、shrinkResources、arm64-only 包、EPG 异步初始化、host 播放器记忆、一个台最多换一次播放器、手机遥控台、站点自检
 
             ### 版本号规则
             同一天多次构建依次为 `261024v1`、`261024v2`、`261024v3`…，versionCode 为「天×1000+序号」。
