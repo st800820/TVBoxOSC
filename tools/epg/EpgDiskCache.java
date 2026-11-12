@@ -147,7 +147,17 @@ public class EpgDiskCache {
         }
         put(channelName + CURRENT_SUFFIX, body);
         put(norm(channelName) + CURRENT_SUFFIX, body);
-        titleCacheAt.remove(channelName);
+        // 频道列表可能早于 EPG 响应绑定过一次并缓存了 null（5 分钟内存缓存）；
+        // 把原名与归一化别名的旧结果一并清掉，否则同一进程内列表 5 分钟都不刷新（v5 实测）
+        String n = norm(channelName);
+        java.util.Iterator<String> it = titleCacheAt.keySet().iterator();
+        while (it.hasNext()) {
+            String k = it.next();
+            if (norm(k).equals(n)) {
+                it.remove();
+                titleCache.remove(k);
+            }
+        }
     }
 
     /** 频道列表用：返回当前时段节目名；没有缓存或解析不出来返回 null */

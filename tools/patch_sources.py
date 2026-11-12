@@ -1102,6 +1102,9 @@ try:
         '                    hsEpg.put(savedEpgKey, tyList);\n'
         '                    showEpg(date, tyList);\n'
         '                    showBottomEpg();\n'
+        '                    if (liveChannelItemAdapter != null) {\n'
+        '                        liveChannelItemAdapter.notifyDataSetChanged();   // 列表立即刷新「正在播」\n'
+        '                    }\n'
         '                    return;\n'
         '                }\n'
         '            } catch (Exception e) {\n'
@@ -1123,6 +1126,9 @@ try:
         '        if (!arrayList.isEmpty()) {\n'
         '            com.github.tvbox.osc.util.EpgDiskCache.put(savedEpgKey, paramString);\n'
         '            com.github.tvbox.osc.util.EpgDiskCache.putCurrent(channelNameReal, paramString);\n'
+        '            if (liveChannelItemAdapter != null) {\n'
+        '                liveChannelItemAdapter.notifyDataSetChanged();   // 列表立即刷新「正在播」\n'
+        '            }\n'
         '        }\n'
         '        if (!isCurrentEpgRequest(savedEpgKey)) return;\n',
         required=False, expect=1,
