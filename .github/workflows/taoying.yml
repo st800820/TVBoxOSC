@@ -124,7 +124,7 @@ jobs:
         run: |
           chmod +x gradlew
           set -o pipefail
-          ./gradlew assembleJavaRelease assembleJava32Release --stacktrace 2>&1 | tee /tmp/build.log
+          ./gradlew assembleJavaRelease assembleJava32Release assembleJava64Release --stacktrace 2>&1 | tee /tmp/build.log
 
       - name: Verify And Collect
         working-directory: TVBoxOSC
@@ -134,12 +134,15 @@ jobs:
           BT=$(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V | tail -1)
           echo "build-tools: $BT"
           mkdir -p apk
-          UNI=""; A32=""
+          UNI=""; A32=""; A64=""
           for f in $(find app/build/outputs/apk -name '*.apk' | grep -v unsigned); do
             echo "== 候选: $f"
-            "$BT/aapt2" dump badging "$f" | head -3
-            if "$BT/aapt2" dump badging "$f" | grep -q "native-code: .*arm64"; then
+            NC=$("$BT/aapt2" dump badging "$f" | grep 'native-code:' || true)
+            echo "  $NC"
+            if echo "$NC" | grep -q 'armeabi-v7a' && echo "$NC" | grep -q 'arm64-v8a'; then
               UNI="$f"
+            elif echo "$NC" | grep -q 'arm64-v8a'; then
+              A64="$f"
             else
               A32="$f"
             fi
@@ -147,6 +150,7 @@ jobs:
           [ -n "$UNI" ] || { echo "::error::未产出双架构通用包"; exit 1; }
           echo "通用包: $UNI"
           echo "armv7包: ${A32:-（无）}"
+          echo "arm64包: ${A64:-（无）}"
 
           BAD=$("$BT/aapt2" dump badging "$UNI")
           echo "$BAD" | grep -q "package: name='com.taoying.app'" || { echo "::error::包名不正确"; exit 1; }
@@ -169,6 +173,16 @@ jobs:
             "$BT/apksigner" verify "$A32" > /dev/null 2>&1 \
               || { echo "::error::armv7 包签名校验失败"; exit 1; }
             cp -f "$A32" "apk/TaoYing_${SHORT}_arm32.apk"
+          fi
+          if [ -n "$A64" ]; then
+            BAD64=$("$BT/aapt2" dump badging "$A64")
+            echo "$BAD64" | grep -q "native-code: 'arm64-v8a'" || { echo "::error::arm64 包架构异常"; exit 1; }
+            echo "$BAD64" | grep -q "armeabi-v7a" && { echo "::error::arm64 包混入 32 位库"; exit 1; }
+            unzip -l "$A64" | grep -q "META-INF/.*\.SF" \
+              || { echo "::error::arm64 包缺 v1 签名"; exit 1; }
+            "$BT/apksigner" verify "$A64" > /dev/null 2>&1 \
+              || { echo "::error::arm64 包签名校验失败"; exit 1; }
+            cp -f "$A64" "apk/TaoYing_${SHORT}_arm64.apk"
           fi
 
           echo "== 产物 =="
@@ -202,18 +216,18 @@ jobs:
             | 上游源码 | q215613905/TVBoxOS @ `${{ env.UPSTREAM_SHA }}` |
             | 内置源 | ${{ env.API_URL }} |
 
-            ### 两个包怎么选
-            - `*_universal.apk`：arm64 + armv7 通用，新手机/新盒子用这个
-            - `*_arm32.apk`：仅 armeabi-v7a，体积小约 13 MB，**安卓 4.4 老机顶盒优先装这个**
+            ### 三个包怎么选（按体积从小到大）
+            - `*_arm64.apk`：**仅 arm64-v8a，本次新增**。64 位新盒子/新手机优先，只装一套 so，体积最小且原生性能最好（minSdk 21）
+            - `*_arm32.apk`：仅 armeabi-v7a，**安卓 4.4 老机顶盒优先装这个**
+            - `*_universal.apk`：arm64 + armv7 双份 so，需要兼容多种设备时才用
 
-            ### 本版改动
-            - **直播源**：只保留央视 + 31 个省级卫视（体育、电影、城市台已剔除）；同一频道 IPv6 线路排在最前，连不上时 App 会在 3–10 秒内自动切下一条
-            - **修复 EPG 变慢**：去掉 m3u 里的 `x-tvg-url`，改回按频道查询（每次几 KB），不再每个台都去下 922 KB 的全量节目表
-            - **全屏返回**：播放控制条新增「‹ 返回」按钮，点一下直接回到频道列表
-            - **关于页**：精简文案，保留原版出处，标注二次封装
-            - **点播源自检**：每 3 天自动体检一次，结果写到 `files/site-health.json`
-            - 移除代码零引用的 cronet 依赖（省约 4 MB）
-            - 构建期断言：包名 / minSdk / 架构 / v1 签名，任一不符即中止出包
+            ### 本版改动（2026-11-12 云主机 A/B 实测驱动）
+            - **换源/换播放器超时 4s → 1.5s**：T0 基线 12 次切台发生 10 次播放器切换，等待中位 4.035s；154 条线路分片级探活显示索引响应中位仅 0.133s，4 秒里约 3 秒是纯浪费
+            - **IJK 参数补齐**：`min-frames=5` / `flush_packets=1` / `seek-at-start=0` / `sw-fallback=1`，缩短首帧延迟、硬解失败自动回退软解
+            - **新增 4MB probesize 对照**：`硬解码·稳定4M` 组，对齐盒端实测 `IJK_probesize=4096000`，1MB 激进组保留可回退
+            - **启用 shrinkResources**：剔除未引用资源，压 APK 体积
+            - **新增 arm64-only 构建产物**：单架构包，服务「轻小」目标
+            - 保留既有：EPG 异步初始化、host 播放器记忆、一个台最多换一次播放器、手机遥控台、站点自检
 
             ### 版本号规则
             同一天多次构建依次为 `261024v1`、`261024v2`、`261024v3`…，versionCode 为「天×1000+序号」。

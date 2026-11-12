@@ -141,6 +141,17 @@ if "signingConfigs {" not in g.text:
 else:
     skipped.append("签名块已存在，跳过注入")
 
+# [观影听涛 2026-11-12] 启用资源压缩：release 已开 minifyEnabled，配套 shrinkResources
+# 可剔除未被引用的 res/ 资源；失败只跳过，不影响出包。
+g.replace(
+    "启用资源压缩 shrinkResources",
+    "        release {\n            signingConfig signingConfigs.myConfig\n            minifyEnabled true",
+    "        release {\n            signingConfig signingConfigs.myConfig\n"
+    "            minifyEnabled true\n            shrinkResources true",
+    required=False,
+    expect=1,
+)
+
 # 去掉零引用的 cronet（代码零 import，纯占体积；4.4 上也不参与逻辑）
 g.replace(
     "移除 cronet-okhttp 依赖",
@@ -480,6 +491,39 @@ except SystemExit:
     skipped.append("player 模块清单不存在，跳过权限收敛")
 
 # ----------------------------------------------------------------------------
+# 4.9b 补齐 IJK 秒开参数 + 增加 4MB probesize 对照（2026-11-12 云主机实测驱动）
+# ----------------------------------------------------------------------------
+# 依据：超级直播 3.5.1 反编译 b0;->a() 的 setOption 清单，以及盒端 Configuration.json
+# 实测 IJK_probesize=4096000。T0 基线显示 4 秒固定超时是主要浪费，参数只解决起流后的
+# 首帧延迟，不解决超时；两组任务分开，避免混淆。
+# 不设 packet-buffering=0：该组同时用于点播 IJK，关缓冲会造成点播反复卡顿。
+import json as _json
+
+_ijk_groups = _json.loads("[" + INJECT_IJK + "]")
+_IJK_EXTRA = [
+    {"name": "min-frames", "category": 4, "value": "5"},
+    {"name": "flush_packets", "category": 4, "value": "1"},
+    {"name": "seek-at-start", "category": 4, "value": "0"},
+    {"name": "sw-fallback", "category": 4, "value": "1"},
+]
+for _g in _ijk_groups:
+    _have = {o["name"] for o in _g["options"]}
+    for _o in _IJK_EXTRA:
+        if _o["name"] not in _have:
+            _g["options"].append(dict(_o))
+# 第三组：与「硬解码·秒开」完全相同，仅 probesize 回到盒端实测的 4MB，供实机 A/B
+_stable = _json.loads(_json.dumps(_ijk_groups[1]))
+for _o in _stable["options"]:
+    if _o["name"] == "probesize":
+        _o["value"] = "4096000"
+_stable["group"] = "硬解码·稳定4M"
+_ijk_groups.append(_stable)
+INJECT_IJK = ",".join(
+    _json.dumps(g, ensure_ascii=False, separators=(",", ":")) for g in _ijk_groups
+)
+done.append("IJK 秒开参数补齐 min-frames/flush_packets/seek-at-start/sw-fallback + 4MB 对照")
+
+# ----------------------------------------------------------------------------
 # 4.9 IJK 起播加速参数（2026-10-24）
 # ----------------------------------------------------------------------------
 # 上游默认两组（软/硬解码）都缺 probesize 和 analyzeduration，ffmpeg 走默认值
@@ -660,16 +704,19 @@ except SystemExit:
     skipped.append("ApiConfig.java 不存在，跳过直播播放器固定")
 
 # ----------------------------------------------------------------------------
-# 4.13 直播换源/换播放器超时 10s -> 4s
+# 4.13 直播换源/换播放器超时 10s -> 4s -> 1.5s
 # ----------------------------------------------------------------------------
 # 原逻辑 (LIVE_CONNECT_TIMEOUT 默认 1 + 1) * 5000 = 10 秒才切下一条线路/播放器。
-# 实测切台中位 15.3 秒，其中 10 秒都花在等这个超时。压到 4 秒。
+# 2026-11-06 实测切台中位 15.3 秒，其中 10 秒都花在等这个超时，压到 4 秒。
+# 2026-11-12 云主机 T0 复测：12 次切台发生 10 次播放器切换，等待中位 4.035s；
+# 同时对 154 条线路做分片级探活，m3u8 索引返回中位仅 0.133s。
+# 结论：4 秒里约 3 秒是纯浪费，压到 1.5 秒（留足弱网余量，且失败会自动换源）。
 try:
     _lp = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
     _lp.replace(
-        "换源超时改 4 秒",
+        "换源超时改 1.5 秒",
         '(Hawk.get(HawkConfig.LIVE_CONNECT_TIMEOUT, 1) + 1) * 5000L',
-        '(Hawk.get(HawkConfig.LIVE_CONNECT_TIMEOUT, 0) + 1) * 4000L',
+        '(Hawk.get(HawkConfig.LIVE_CONNECT_TIMEOUT, 0) + 1) * 1500L',
         required=False,
         expect=1,
     )
