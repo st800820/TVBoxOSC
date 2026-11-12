@@ -128,12 +128,25 @@ public class EpgDiskCache {
         }
     }
 
-    /** 每次成功拿到某台节目单时，额外写一份固定 key 供频道列表读取 */
+    /**
+     * 台名归一化：上游拿 EPG 时会把 "CCTV-11" 规范成 "CCTV11"，而频道列表显示的是
+     * 原始台名 "CCTV-11"。两边直接用各自的名字当 key 会对不上（v4 实测根因），
+     * 所以写入/读取都同时兼容「原名」和「去符号小写名」。
+     */
+    private static String norm(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replaceAll("[^a-zA-Z0-9\\u4e00-\\u9fa5]", "").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** 每次成功拿到某台节目单时，额外写固定 key 供频道列表读取（原名 + 归一化别名各一份） */
     public static void putCurrent(String channelName, String body) {
         if (channelName == null) {
             return;
         }
         put(channelName + CURRENT_SUFFIX, body);
+        put(norm(channelName) + CURRENT_SUFFIX, body);
         titleCacheAt.remove(channelName);
     }
 
@@ -148,9 +161,17 @@ public class EpgDiskCache {
             return titleCache.get(channelName);
         }
         String title = null;
-        String body = get(channelName + CURRENT_SUFFIX, false);
+        String rawKey = channelName + CURRENT_SUFFIX;
+        String normKey = norm(channelName) + CURRENT_SUFFIX;
+        String body = get(rawKey, false);
+        if (body == null && !normKey.equals(rawKey)) {
+            body = get(normKey, false);                       // EPG 侧用的是规范化台名
+        }
         if (body == null) {
-            body = get(channelName + CURRENT_SUFFIX, true);   // 过期也先显示旧节目单
+            body = get(rawKey, true);                         // 过期也先显示旧节目单
+        }
+        if (body == null && !normKey.equals(rawKey)) {
+            body = get(normKey, true);
         }
         if (body != null && body.trim().startsWith("{")) {
             try {
