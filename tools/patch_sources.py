@@ -1047,6 +1047,106 @@ try:
 except SystemExit:
     skipped.append("LivePlayActivity 不存在，跳过错误即换源")
 
+# ----------------------------------------------------------------------------
+# 4.19 EPG 本地库最小可用版（2026-11-12 下午）
+# ----------------------------------------------------------------------------
+# 上游 hsEpg 是纯内存 Hashtable，进程重启即丢，每次开机都要重新打公益 EPG 接口；
+# 频道列表也只显示台名。借鉴超级直播 epg.db 的思想，但用「按台缓存原始响应体」实现：
+#   - 成功响应落盘（原子写 + MD5 文件名），TTL 6h
+#   - 命中缓存直接复用上游 parseJsonEpg/parseXmlEpg，零侵入、不改格式
+#   - 缓存过期或接口失败时读旧库，弱网下仍有节目单
+#   - 频道列表在台名后追加「正在播」的节目名（带 5 分钟内存缓存，避免滚动时反复读盘）
+# 明确不做：m3u 头写 x-tvg-url（静态 gz 忽略 query，922KB 全量每切台白下，10 月踩过）；
+#           全量 7 天预取（公益接口是按台查询，批量预取反而打爆接口）。
+_epgsrc = pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")) / "tools/epg/EpgDiskCache.java"
+if _epgsrc.exists():
+    _epgdst = ROOT / "app/src/main/java/com/github/tvbox/osc/util/EpgDiskCache.java"
+    _epgdst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(_epgsrc, _epgdst)
+    done.append("注入 EpgDiskCache（EPG 落盘缓存 + 当前节目查询）")
+else:
+    skipped.append("缺少 tools/epg/EpgDiskCache.java")
+
+try:
+    _ep = Doc("app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java")
+
+    # 1) getEpg：内存缓存未命中时，先查磁盘缓存（含旧库兜底）
+    _ep.replace(
+        "EPG 磁盘缓存命中",
+        '        if (hsEpg.containsKey(savedEpgKey)){\n'
+        '            showEpg(date, hsEpg.get(savedEpgKey));\n'
+        '            showBottomEpg();\n'
+        '            return;\n'
+        '        }\n'
+        '        updateEpgPanelState(false);\n'
+        '        requestEpg(url, date, channelNameReal, finalEpgTagName, savedEpgKey, epgQueryNames, timeFormat, 0);\n',
+        '        if (hsEpg.containsKey(savedEpgKey)){\n'
+        '            showEpg(date, hsEpg.get(savedEpgKey));\n'
+        '            showBottomEpg();\n'
+        '            return;\n'
+        '        }\n'
+        '        // [观影听涛] 磁盘缓存命中：进程重启后仍有效，不再请求公益 EPG 接口\n'
+        '        String tyCached = com.github.tvbox.osc.util.EpgDiskCache.get(savedEpgKey, false);\n'
+        '        if (tyCached == null) {\n'
+        '            tyCached = com.github.tvbox.osc.util.EpgDiskCache.get(savedEpgKey, true);\n'
+        '        }\n'
+        '        if (tyCached != null) {\n'
+        '            try {\n'
+        '                ArrayList<Epginfo> tyList;\n'
+        '                if (isXmlEpgResponse(tyCached)) {\n'
+        '                    tyList = parseXmlEpg(tyCached, finalEpgTagName, date);\n'
+        '                } else {\n'
+        '                    tyList = parseJsonEpg(tyCached, date);\n'
+        '                }\n'
+        '                if (tyList != null && !tyList.isEmpty()) {\n'
+        '                    hsEpg.put(savedEpgKey, tyList);\n'
+        '                    showEpg(date, tyList);\n'
+        '                    showBottomEpg();\n'
+        '                    return;\n'
+        '                }\n'
+        '            } catch (Exception e) {\n'
+        '                // 缓存坏了就当没命中，继续走网络，绝不影响播放\n'
+        '            }\n'
+        '        }\n'
+        '        updateEpgPanelState(false);\n'
+        '        requestEpg(url, date, channelNameReal, finalEpgTagName, savedEpgKey, epgQueryNames, timeFormat, 0);\n',
+        required=False, expect=1,
+    )
+
+    # 2) 请求成功：落盘 + 写一份供频道列表读取的固定 key
+    _ep.replace(
+        "EPG 响应落盘",
+        '        hsEpg.put(savedEpgKey, arrayList);\n'
+        '        if (!isCurrentEpgRequest(savedEpgKey)) return;\n',
+        '        hsEpg.put(savedEpgKey, arrayList);\n'
+        '        // [观影听涛] 落盘：下次启动 / 切回该台直接命中，不再请求公益接口\n'
+        '        if (!arrayList.isEmpty()) {\n'
+        '            com.github.tvbox.osc.util.EpgDiskCache.put(savedEpgKey, paramString);\n'
+        '            com.github.tvbox.osc.util.EpgDiskCache.putCurrent(channelNameReal, paramString);\n'
+        '        }\n'
+        '        if (!isCurrentEpgRequest(savedEpgKey)) return;\n',
+        required=False, expect=1,
+    )
+    _ep.save()
+except SystemExit:
+    skipped.append("LivePlayActivity 不存在，跳过 EPG 落盘")
+
+# 3) 频道列表：台名后追加「正在播」的节目名
+try:
+    _ad = Doc("app/src/main/java/com/github/tvbox/osc/ui/adapter/LiveChannelItemAdapter.java")
+    _ad.replace(
+        "频道列表显示正在播",
+        '        tvChannel.setText(item.getChannelName());\n',
+        '        // [观影听涛] 有本地 EPG 缓存时在台名后显示正在播的节目\n'
+        '        String tyProg = com.github.tvbox.osc.util.EpgDiskCache.currentProgram(item.getChannelName());\n'
+        '        tvChannel.setText(tyProg == null ? item.getChannelName()\n'
+        '                : item.getChannelName() + "  ·  " + tyProg);\n',
+        required=False, expect=1,
+    )
+    _ad.save()
+except SystemExit:
+    skipped.append("LiveChannelItemAdapter 不存在，跳过频道列表节目名")
+
 # local.properties 清空，避免继承本机 SDK 路径
 with open(ROOT / "local.properties", "w", encoding="utf-8", newline="") as f:
     f.write("")
@@ -1065,6 +1165,10 @@ checks = [
      "immediateErrorChangeSource"),
     ("错误即换源-跳过播放器", "app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java",
      "echo-errorChangeSource immediate"),
+    ("EPG 落盘缓存", "app/src/main/java/com/github/tvbox/osc/ui/activity/LivePlayActivity.java",
+     "EpgDiskCache.get(savedEpgKey"),
+    ("EPG 列表显示", "app/src/main/java/com/github/tvbox/osc/ui/adapter/LiveChannelItemAdapter.java",
+     "EpgDiskCache.currentProgram"),
 ]
 for name, rel, needle in checks:
     text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
